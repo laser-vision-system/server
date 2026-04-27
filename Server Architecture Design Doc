@@ -33,7 +33,8 @@ This document will not detail how the south or northbound APIs should work, inst
 - All communication outside the main server process should be done via APIs 
 
 ##Language, Tools and Libraries Used 
-- All server language should be done in rust  
+- All server language should be written in rust  
+ - Rust being a low-level language will be very efficient when it comes to processing power requirements, will allow us to run the processes alongside other applications/processes  
 - Data that is being passed through the server should reflect that outlined in the API design docs  
 - TODO: Libraries used 
 
