@@ -1,0 +1,43 @@
+#Server Architecture Design document 
+
+##Introduction and overview 
+
+As per the team and project plan the Central Control Tier is outlined below: 
+
+Tier 3: Central Control Tier (Control-com) 
+- Acts as the command centre, receiving the much lighter processed data from tier 2, and sending control action requests back down the hierarchy. 
+- Manages the dynamic connection/disconnection of the µ-com. 
+
+This document will not detail how the south or northbound APIs should work, instead focusing on how the server handles requests sent from both APIs.  
+
+##Design structure 
+
+###Resource usage 
+- Should be efficient to allow for us to run the process on the lab computer or alongside the machine vision system aboard the raspberry pi 
+
+###Data Handling 
+
+####Should hold on to some values in memory  
+- Current set point  
+- Current deviation  
+
+####Stretch goals for permanent storage 
+- Prior set points 
+- Prior Deviations 
+
+##Data design 
+- will store data in the same format as the north and southbound API
+- .Json, works best with RESTful APIs
+
+##Project Assumptions 
+- All communication outside the main server process should be done via APIs 
+
+##Language, Tools and Libraries Used 
+- All server language should be written in rust  
+ - Rust being a low-level language will be very efficient when it comes to processing power requirements, will allow us to run the processes alongside other applications/processes  
+- Data that is being passed through the server should reflect that outlined in the API design docs  
+- TODO: Libraries used 
+
+##Glossary of terms 
+
+ 
