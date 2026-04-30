@@ -1,0 +1,14 @@
+/home/oatmeal/Git-projects/server-development/southbound_api/target/debug/deps/libserde-06499df448402f95.rmeta: /home/oatmeal/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/lib.rs /home/oatmeal/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/integer128.rs /home/oatmeal/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/mod.rs /home/oatmeal/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/de.rs /home/oatmeal/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/ser.rs /home/oatmeal/Git-projects/server-development/southbound_api/target/debug/build/serde-af605b6513e351a4/out/private.rs
+
+/home/oatmeal/Git-projects/server-development/southbound_api/target/debug/deps/libserde-06499df448402f95.rlib: /home/oatmeal/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/lib.rs /home/oatmeal/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/integer128.rs /home/oatmeal/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/mod.rs /home/oatmeal/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/de.rs /home/oatmeal/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/ser.rs /home/oatmeal/Git-projects/server-development/southbound_api/target/debug/build/serde-af605b6513e351a4/out/private.rs
+
+/home/oatmeal/Git-projects/server-development/southbound_api/target/debug/deps/serde-06499df448402f95.d: /home/oatmeal/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/lib.rs /home/oatmeal/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/integer128.rs /home/oatmeal/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/mod.rs /home/oatmeal/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/de.rs /home/oatmeal/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/ser.rs /home/oatmeal/Git-projects/server-development/southbound_api/target/debug/build/serde-af605b6513e351a4/out/private.rs
+
+/home/oatmeal/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/lib.rs:
+/home/oatmeal/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/integer128.rs:
+/home/oatmeal/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/mod.rs:
+/home/oatmeal/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/de.rs:
+/home/oatmeal/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/ser.rs:
+/home/oatmeal/Git-projects/server-development/southbound_api/target/debug/build/serde-af605b6513e351a4/out/private.rs:
+
+# env-dep:OUT_DIR=/home/oatmeal/Git-projects/server-development/southbound_api/target/debug/build/serde-af605b6513e351a4/out
