@@ -1,0 +1,9 @@
+[package]
+name = "southbound_api"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+rastapi = "0.1.0"
+actix-web = "4"
+serde = { version = "1.0.228", features = ["derive"] }
