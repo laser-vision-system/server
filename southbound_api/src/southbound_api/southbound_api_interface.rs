@@ -18,7 +18,6 @@ pub async fn southbound_api_interface() -> std::io::Result<()> {
     let configuration = web::Data::new(Configuration {
         configuration: Mutex::new("".to_string())
     });
-
     HttpServer::new(move || {
         App::new()
             .app_data(setpoint.clone())
@@ -32,10 +31,13 @@ pub async fn southbound_api_interface() -> std::io::Result<()> {
             .route("/micro_computer_info", web::get().to(get_micro_computer_info))
             .route("/micro_computer_info", web::post().to(set_micro_computer_info))
             .route("/configuration", web::get().to(get_configuration))
-            .route("/configuration", web::post().to(set_configuration))
+            .route("/configuration", web::post().to(set_configuration));
+        App::new()
+            .configure(set_point)
+            .configure(frame_service)
 
     })
-        .bind("127.0.0.1:8080")?
+        .bind("192.168.1.70:8080")?
         .run()
         .await
 }
