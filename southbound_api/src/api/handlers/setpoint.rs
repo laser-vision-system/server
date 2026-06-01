@@ -1,4 +1,4 @@
-use actix_web::{web, get, HttpResponse, http::header::ContentType};
+use actix_web::{web, get, post, HttpResponse, http::header::ContentType};
 use std::sync::Mutex;
 use serde::Deserialize;
 
@@ -14,4 +14,11 @@ pub async fn get_set_point(data: web::Data<SetPoint>) -> HttpResponse {
     HttpResponse::Ok()
         .content_type(ContentType::xml())
         .body(setpoint_response.to_string())
+}
+
+#[post("/setpoint")]
+pub async fn post_set_point(data: web::Data<SetPoint>) -> HttpResponse {
+    let mut setpoint = data.setpoint.lock().unwrap();
+    *setpoint = true;
+    HttpResponse::Ok().finish()
 }
