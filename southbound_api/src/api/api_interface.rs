@@ -1,9 +1,9 @@
 use std::sync::{Mutex};
 use actix_multipart::form::tempfile::TempFileConfig;
-use crate::southbound_api::handlers::setpoint::{SetPoint};
-use crate::southbound_api::handlers::configuration::{Configuration};
-use crate::southbound_api::routes::southbound_api::config as southbound_config;
-use crate::southbound_api::routes::northbound_api::config as northbound_config;
+use crate::api::handlers::setpoint::{SetPoint};
+use crate::api::handlers::configuration::{Configuration};
+use crate::api::routes::southbound_api::config as southbound_config;
+use crate::api::routes::northbound_api::config as northbound_config;
 use actix_web::{middleware, web, App, HttpServer};
 #[actix_web::main]
 pub async fn api_interface() -> std::io::Result<()> {
