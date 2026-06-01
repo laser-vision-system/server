@@ -1,4 +1,3 @@
-pub mod southbound_api_interface;
-pub mod data_structs;
+pub mod api_interface;
 pub mod routes;
 pub mod handlers;

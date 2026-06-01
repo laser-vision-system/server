@@ -1,2 +1,3 @@
 pub mod setpoint;
-pub mod frame;
+pub mod image;
+pub mod configuration;
