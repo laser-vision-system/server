@@ -20,5 +20,5 @@ pub async fn get_set_point(data: web::Data<SetPoint>) -> HttpResponse {
 pub async fn post_set_point(data: web::Data<SetPoint>) -> HttpResponse {
     let mut setpoint = data.setpoint.lock().unwrap();
     *setpoint = true;
-    HttpResponse::Ok().finish()
+    HttpResponse::Ok().body("Next frame tagged as setpoint")
 }
