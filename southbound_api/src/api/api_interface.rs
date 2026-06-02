@@ -34,7 +34,7 @@ pub async fn api_interface() -> std::io::Result<()> {
             .configure(southbound_config)
             .configure(northbound_config)
     })
-        .bind("127.0.0.1:8080")?
+        .bind("0.0.0.0:8080")?
         .run()
         .await
 }
