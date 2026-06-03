@@ -7,7 +7,7 @@ use crate::api::handlers::setpoint::{post_set_point};
 pub fn config(config: &mut web::ServiceConfig){
     config
         .service(download_image)
-        .service(post_set_point)
+        .service(post_gui_update)
         .service(post_configuration)
         .service(get_camera_info);
 }
