@@ -12,8 +12,9 @@ pub async fn api_interface() -> std::io::Result<()> {
     env_logger::init_from_env(env_logger::Env::new().default_filter_or("info")); //debug logs
     log::info!("creating temporary upload directory");
     std::fs::create_dir_all("./tmp")?;
-    let setpoint = web::Data::new(SetPoint {
+    let gui_update = web::Data::new(GuiUpdate {
         setpoint: Mutex::new(false), // creates data storage object for setpoint
+        config: Mutex::new(false),
     });
     let configuration = web::Data::new(Configuration {
         brightness: Mutex::new(1f32),
