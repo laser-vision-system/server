@@ -28,10 +28,14 @@ pub async fn get_gui_update(data: web::Data<GuiUpdate>) -> HttpResponse {
 }
 
 #[post("/gui_update")]
-pub async fn post_gui_update(data: web::Data<GuiUpdate>) -> HttpResponse {
+pub async fn post_gui_update(data: web::Data<GuiUpdate>, json: web::Json<GuiUpdate>) -> HttpResponse {
     let mut setpoint = data.setpoint.lock().unwrap();
-    let mut framerate = data.framerate.lock().unwrap();
-    *setpoint = json.setpoint.lock().unwrap().clone();
-    *config = json.config.lock().unwrap().clone();
+    let mut config = data.config.lock().unwrap();
+    if(json.setpoint.lock().unwrap() == true) {
+        *setpoint = true;
+    }
+    if(json.config.lock().unwrap() == true) {
+        *config = false;
+    }
     HttpResponse::Ok().body("Configuration upload successful")
 }
