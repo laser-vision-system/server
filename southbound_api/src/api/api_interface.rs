@@ -1,6 +1,6 @@
 use std::sync::{Mutex};
 use actix_multipart::form::tempfile::TempFileConfig;
-use crate::api::handlers::setpoint::{SetPoint};
+use crate::api::handlers::gui_update::{GuiUpdate};
 use crate::api::handlers::configuration::{Configuration};
 use crate::api::handlers::camera_info::{CameraInfo};
 use crate::api::routes::southbound_api::config as southbound_config;
@@ -29,7 +29,7 @@ pub async fn api_interface() -> std::io::Result<()> {
 
     HttpServer::new(move || {
         App::new()
-            .app_data(setpoint.clone())
+            .app_data(gui_update.clone())
             .app_data(configuration.clone())
             .app_data(camera_info.clone())
             .wrap(middleware::Logger::default())
