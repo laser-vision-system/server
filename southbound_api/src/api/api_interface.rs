@@ -18,7 +18,8 @@ pub async fn api_interface() -> std::io::Result<()> {
     let configuration = web::Data::new(Configuration {
         brightness: Mutex::new(1i32),
         hue: Mutex::new(1i32),
-        saturation: Mutex::new(1i32)
+        saturation: Mutex::new(1i32),
+        framerate: Mutex::new(1f32),
     });
     let camera_info = web::Data::new(CameraInfo {
         intensity: Mutex::new(10f32),
