@@ -22,10 +22,10 @@ struct ConfigurationJson {
 #[get("/configuration")]
 pub async fn get_configuration(data: web::Data<Configuration>) -> impl Responder {
 	let response = ConfigurationJson {
-		brightness: Mutex::from(data.brightness.lock().unwrap().clone()),
-		hue: Mutex::from(data.hue.lock().unwrap().clone()),
-		saturation: Mutex::from(data.saturation.lock().unwrap().clone()),
-		framerate: Mutex::from(data.framerate.lock().unwrap().clone()),
+		brightness: Mutex::from(*data.brightness.lock().unwrap()),
+		hue: Mutex::from(*data.hue.lock().unwrap()),
+		saturation: Mutex::from(*data.saturation.lock().unwrap()),
+		framerate: Mutex::from(*data.framerate.lock().unwrap()),
 	};
 	HttpResponse::Ok()
 		.content_type(ContentType::json())
@@ -40,9 +40,9 @@ pub async fn post_configuration(
 	let mut hue = data.hue.lock().unwrap();
 	let mut saturation = data.saturation.lock().unwrap();
 	let mut framerate = data.framerate.lock().unwrap();
-	*brightness = json.brightness.lock().unwrap().clone();
-	*hue = json.hue.lock().unwrap().clone();
-	*saturation = json.saturation.lock().unwrap().clone();
-	*framerate = json.framerate.lock().unwrap().clone();
+	*brightness = *json.brightness.lock().unwrap();
+	*hue = *json.hue.lock().unwrap();
+	*saturation = *json.saturation.lock().unwrap();
+	*framerate = *json.framerate.lock().unwrap();
 	HttpResponse::Ok().body("Configuration upload successful")
 }

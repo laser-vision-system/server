@@ -19,8 +19,8 @@ struct GuiUpdateJson {
 #[get("/gui_update")]
 pub async fn get_gui_update(data: web::Data<GuiUpdate>) -> impl Responder {
 	let response = GuiUpdateJson {
-		setpoint: Mutex::from(data.setpoint.lock().unwrap().clone()),
-		config: Mutex::from(data.config.lock().unwrap().clone()),
+		setpoint: Mutex::from(*data.setpoint.lock().unwrap()),
+		config: Mutex::from(*data.config.lock().unwrap()),
 	};
 	let mut setpoint = data.setpoint.lock().unwrap();
 	let mut config = data.config.lock().unwrap();
@@ -38,10 +38,10 @@ pub async fn post_gui_update(
 ) -> impl Responder {
 	let mut setpoint = data.setpoint.lock().unwrap();
 	let mut config = data.config.lock().unwrap();
-	if json.setpoint.lock().unwrap().clone() {
+	if *json.setpoint.lock().unwrap() {
 		*setpoint = true;
 	}
-	if json.config.lock().unwrap().clone() {
+	if *json.config.lock().unwrap() {
 		*config = true;
 	}
 	HttpResponse::Ok().body("Configuration upload successful")

@@ -17,8 +17,8 @@ pub struct CameraInfoJson {
 #[get("/camera_info")]
 pub async fn get_camera_info(data: web::Data<CameraInfo>) -> impl Responder {
 	let response = CameraInfoJson {
-		intensity: Mutex::from(data.intensity.lock().unwrap().clone()),
-		deviation: Mutex::from(data.deviation.lock().unwrap().clone()),
+		intensity: Mutex::from(*data.intensity.lock().unwrap()),
+		deviation: Mutex::from(*data.deviation.lock().unwrap()),
 	};
 	HttpResponse::Ok()
 		.content_type(ContentType::json())
@@ -31,7 +31,7 @@ pub async fn post_camera_info(
 ) -> impl Responder {
 	let mut intensity = data.intensity.lock().unwrap();
 	let mut deviation = data.deviation.lock().unwrap();
-	*intensity = json.intensity.lock().unwrap().clone();
-	*deviation = json.deviation.lock().unwrap().clone();
+	*intensity = *json.intensity.lock().unwrap();
+	*deviation = *json.deviation.lock().unwrap();
 	HttpResponse::Ok().body("Camera Info upload successful")
 }
