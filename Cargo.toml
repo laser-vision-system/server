@@ -13,6 +13,7 @@ serde = { version = "1.0.228", features = ["derive"] }
 actix-multipart = "0.7.2"
 log = "0.4.29"
 env_logger = "0.11.10"
+rand = "0.10.1"
 
 [lints.rust]
 unsafe_code = "deny" # We should avoid using unsafe code as much as possible.
