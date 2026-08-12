@@ -1,6 +1,5 @@
 mod server;
-mod gui_handler;
-mod edge_handler;
+mod handler;
 
 use std::io;
 use actix_files::NamedFile;
@@ -14,12 +13,25 @@ use self::server::{Server, ServerHandle};
 pub type ConnId = u64;
 pub type Msg = String;
 
+#[derive(Debug, Clone, Copy)]
+enum WSSide {
+    Edge,
+    GUI
+}
+
 async fn gui_ws(
     req: HttpRequest,
     stream: web::Payload,
     server: web::Data<ServerHandle>,
 ) -> Result<HttpResponse, Error> {
     let (res, session, msg_stream) = actix_ws::handle(&req, stream)?;
+
+    spawn_local(handler::ws_handler(
+        (**server).clone(),
+        session,
+        msg_stream,
+        WSSide::GUI
+    ));
 
     Ok(res)
 }
@@ -31,8 +43,17 @@ async fn edge_ws(
 ) -> Result<HttpResponse, Error> {
     let (res, session, msg_stream) = actix_ws::handle(&req, stream)?;
 
+    spawn_local(handler::ws_handler(
+        (**server).clone(),
+        session,
+        msg_stream,
+        WSSide::Edge
+    ));
+
     Ok(res)
 }
+
+
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> io::Result<()> {
