@@ -3,10 +3,6 @@ use rand;
 use std::{
     collections::{HashMap, HashSet},
     io,
-    sync::{
-        Arc,
-        atomic::{AtomicUsize, Ordering},
-    },
 };
 use rand::RngExt;
 use crate::{ConnId, Msg, WSSide};
@@ -23,6 +19,16 @@ enum Command {
         conn: ConnId,
         side: WSSide
     },
+
+    RegisterCameras {
+        conn: ConnId,
+        cameras: HashMap<u32, String>
+    },
+
+    UnregisterCamera {
+        conn: ConnId,
+        camera: u32
+    },
 }
 
 #[derive(Debug)]
@@ -31,7 +37,9 @@ pub struct Server {
 
     edge_sessions: HashMap<ConnId, mpsc::UnboundedSender<Msg>>,
 
-    visitor_count: Arc<AtomicUsize>,
+    cameras: HashMap<(ConnId, u32), String>,
+
+    video_routes: HashMap<(ConnId, u32), ConnId>,
 
     cmd_rx: mpsc::UnboundedReceiver<Command>
 }
@@ -43,7 +51,8 @@ impl Server {
             Self {
                 gui_sessions: HashMap::new(),
                 edge_sessions: HashMap::new(),
-                visitor_count: Arc::new(AtomicUsize::new(0)),
+                cameras: HashMap::new(),
+                video_routes: HashMap::new(),
                 cmd_rx: rx
             },
             ServerHandle { cmd_tx: tx },
@@ -60,7 +69,6 @@ impl Server {
                 self.edge_sessions.insert(id, tx);
             }
         }
-        let count = self.visitor_count.fetch_add(1, Ordering::SeqCst);
 
         id
     }
@@ -76,6 +84,18 @@ impl Server {
         }
     }
 
+    async fn register_cameras(&mut self, conn: ConnId, cameras: HashMap<u32, String>) {
+        for camera in cameras {
+            let camera_id = camera.0;
+            let camera_name = camera.1;
+            self.cameras.insert((conn, camera_id), camera_name);
+        }
+    }
+
+    async fn unregister_camera(&mut self, conn: ConnId, camera: u32) {
+        self.cameras.remove(&(conn, camera));
+    }
+
     pub async fn run(mut self) -> io::Result<()> {
         while let Some(cmd) = self.cmd_rx.recv().await {
             match cmd {
@@ -86,6 +106,14 @@ impl Server {
 
                 Command::Disconnect { conn, side } => {
                     self.disconnect(conn,side).await;
+                }
+
+                Command::RegisterCameras { conn, cameras} => {
+                    self.register_cameras(conn, cameras).await;
+                }
+
+                Command::UnregisterCamera { conn, camera } => {
+                    self.unregister_camera(conn, camera).await;
                 }
             }
         }
@@ -111,5 +139,13 @@ impl ServerHandle {
 
     pub async fn disconnect(&self, conn: ConnId, side: WSSide) {
         self.cmd_tx.send(Command::Disconnect {conn,side}).unwrap();
+    }
+
+    pub async fn register_cameras(&self, conn: ConnId, cameras: HashMap<u32, String>) {
+        self.cmd_tx.send(Command::RegisterCameras {conn,cameras}).unwrap();
+    }
+
+    pub async fn unregister_camera(&self, conn: ConnId, camera: u32) {
+        self.cmd_tx.send(Command::UnregisterCamera {conn,camera}).unwrap();
     }
 }
