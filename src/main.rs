@@ -59,6 +59,8 @@ async fn edge_ws(
 async fn main() -> io::Result<()> {
     let (server, server_tx) = Server::new();
 
+    let server = spawn(server.run());
+
     let http_server = HttpServer::new(move || {
         App::new()
             .app_data(web::Data::new(server_tx.clone()))
@@ -68,6 +70,8 @@ async fn main() -> io::Result<()> {
         .workers(2)
         .bind(("127.0.0.1",8080))?
         .run();
+
+    try_join!(http_server, async move { server.await.unwrap() })?;
 
     Ok(())
 }
