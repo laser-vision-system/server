@@ -1486,7 +1486,16 @@ dependencies = [
  "log",
  "rand 0.10.1",
  "serde",
+ "serde_json",
+ "server-edge-datatypes",
  "tokio",
+]
+
+[[package]]
+name = "server-edge-datatypes"
+version = "0.1.0"
+dependencies = [
+ "serde",
 ]
 
 [[package]]

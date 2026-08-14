@@ -5,6 +5,8 @@ use futures_util::StreamExt as _;
 use tokio::{sync::mpsc, time::interval};
 
 use crate::{ServerHandle, ConnId, WSSide};
+use server_edge_datatypes as datatypes;
+use serde_json::Result;
 
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(5);
 const CLIENT_TIMEOUT: Duration = Duration::from_secs(10);
@@ -81,11 +83,65 @@ pub async fn ws_handler(
 }
 
 async fn process_ws(
-    chat_server: &ServerHandle,
+    server: &ServerHandle,
     session: &mut actix_ws::Session,
     text: &str,
     conn: ConnId,
     side: WSSide
 ) {
+    match side  {
+        WSSide::Edge => {
+            edge_process(server, session, text, conn).await;
+        },
+        WSSide::GUI => {
+
+        }
+    }
     //this should contain the actual logic to deal with incoming text strings from the websockets. Whether this needs to divide into edge and gui functions right away is tbd
+}
+
+async fn edge_process(
+    server: &ServerHandle,
+    session: &mut actix_ws::Session,
+    text: &str,
+    conn: ConnId
+) {
+    let msg = text.trim();
+
+    let mut args = msg.splitn(2, ':');
+
+    match args.next().unwrap() {
+
+        "RegisterCamera" => match args.next() {
+            Some(data) => {
+                let data_unchecked: Result<datatypes::RegisterCamera> = serde_json::from_str(data);
+                if(data_unchecked.is_ok()) {
+                    let cameras = data_unchecked.unwrap();
+                    server.register_cameras(conn, cameras.cameras).await;
+                }
+            }
+
+            None => {
+
+            }
+        }
+
+        "UnregisterCameras" => match args.next() {
+            Some(data) => {
+                let data_unchecked: Result<datatypes::UnregisterCamera> = serde_json::from_str(data);
+                if(data_unchecked.is_ok()) {
+                    let cameras = data_unchecked.unwrap();
+                    server.unregister_camera(conn, cameras.camera_id).await;
+                }
+            }
+
+            None => {
+
+            }
+        }
+
+        _ => {
+
+        }
+    }
 }
