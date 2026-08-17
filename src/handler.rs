@@ -1,6 +1,8 @@
+
 use std::time::{Duration, Instant};
 
-use actix_ws::AggregatedMessage;
+use actix_ws::{AggregatedMessage, CloseReason};
+use actix_web::web::Bytes;
 use futures_util::StreamExt as _;
 use tokio::{sync::mpsc, time::interval};
 
@@ -23,14 +25,28 @@ pub async fn ws_handler(
 
     let (conn_tx, mut conn_rx) = mpsc::unbounded_channel();
 
-    let conn_id = server.connect(conn_tx, side).await;
+    let (img_tx, mut img_rx) = mpsc::unbounded_channel();
+
+    let send_img_tx;
+
+    match side {
+        WSSide::Edge => {
+            send_img_tx = None;
+        }
+
+        WSSide::GUI => {
+            send_img_tx = Some(img_tx);
+        }
+    }
+
+    let conn_id = server.connect(conn_tx, side, send_img_tx).await;
 
     let mut msg_stream = msg_stream
         .max_frame_size(128 * 1024)
         .aggregate_continuations()
         .max_continuation_size(2 * 1024 * 1024);
 
-    let close_reason = loop {
+    let close_reason: Option<CloseReason> = loop {
         tokio::select! { //waits for the first of the following events:
             //handles incoming ws traffic
             Some(Ok(msg)) = msg_stream.next() => {
@@ -49,8 +65,16 @@ pub async fn ws_handler(
                             .await;
                     }
 
-                    AggregatedMessage::Binary(_bin) => {
-                        log::warn!("unexpected binary message");
+                    AggregatedMessage::Binary(bin) => {
+                        match side {
+                            WSSide::GUI => {
+                                break None
+                            }
+
+                            WSSide::Edge => {
+                                server.route_image(conn_id, bin).await;
+                            }
+                        }
                     }
 
                     AggregatedMessage::Close(reason) => break reason,
@@ -61,6 +85,10 @@ pub async fn ws_handler(
             //Sends any text input to the conn_tx sender back to the client
             Some(chat_msg) = conn_rx.recv() => {
                  session.text(chat_msg).await.unwrap();
+            }
+
+            Some(img_data) = img_rx.recv() => {
+                session.binary(img_data).await.unwrap();
             }
 
             //keeps track of timeout conditions

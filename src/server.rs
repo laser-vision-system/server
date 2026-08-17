@@ -4,9 +4,11 @@ use std::{
     collections::{HashMap, HashSet},
     io,
 };
+use std::io::Read;
 use env_logger::Target;
 use rand::RngExt;
 use server_edge_datatypes as datatypes;
+use actix_web::web::Bytes;
 use serde_json;
 use server_edge_datatypes::{GUIImageAnalysis, GUISetpoint, StopViewingCamera, ViewCameraConfig};
 use tokio::sync::mpsc::UnboundedSender;
@@ -17,7 +19,8 @@ enum Command {
     Connect {
         conn_tx: mpsc::UnboundedSender<Msg>,
         res_tx: oneshot::Sender<ConnId>,
-        side: WSSide
+        side: WSSide,
+        img_tx: Option<mpsc::UnboundedSender<Bytes>>,
     },
 
     Disconnect {
@@ -79,13 +82,19 @@ enum Command {
         conn: ConnId,
         target: datatypes::ForgetCamera,
         side: WSSide
-    }
+    },
 
+    RouteImage {
+        conn: ConnId,
+        bytes: Bytes,
+    }
 }
 
 #[derive(Debug)]
 pub struct Server {
     gui_sessions: HashMap<ConnId, mpsc::UnboundedSender<Msg>>,
+
+    gui_img_route: HashMap<ConnId, mpsc::UnboundedSender<Bytes>>,
 
     edge_sessions: HashMap<ConnId, mpsc::UnboundedSender<Msg>>,
 
@@ -102,9 +111,8 @@ impl Server {
         (
             Self {
                 gui_sessions: HashMap::new(),
+                gui_img_route: HashMap::new(),
                 edge_sessions: HashMap::new(),
-                cameras: HashMap::new(),
-                video_routes: HashMap::new(),
                 cameras: HashMap::new(),
                 video_routes: HashMap::new(),
                 cmd_rx: rx
@@ -113,11 +121,12 @@ impl Server {
         )
     }
 
-    async fn connect(&mut self, tx: mpsc::UnboundedSender<Msg>, side: WSSide) -> ConnId {
+    async fn connect(&mut self, tx: mpsc::UnboundedSender<Msg>, img_tx: Option<mpsc::UnboundedSender<Bytes>>, side: WSSide) -> ConnId {
         let id = rand::rng().random::<ConnId>();
         match side {
             WSSide::GUI => {
                 self.gui_sessions.insert(id, tx);
+                self.gui_img_route.insert(id, img_tx.unwrap());
             }
             WSSide::Edge => {
                 self.edge_sessions.insert(id, tx);
@@ -474,11 +483,42 @@ impl Server {
         }
     }
 
+    async fn cam_id_from_bytes(&mut self, bytes: Bytes) -> u64 {
+        let mut buf = [0u8; 8];
+        buf[..8].copy_from_slice(&bytes[..8]);
+        u64::from_be_bytes(buf)
+    }
+
+    async fn route_image(&mut self, conn_id: ConnId, bytes: Bytes) {
+        let len = bytes.len();
+        if len < 10 {
+            return;
+        }
+
+        let camera_id: u64 = self.cam_id_from_bytes(bytes.clone()).await;
+
+        if !self.camera_in_use(conn_id, camera_id){
+            return
+        }
+
+        let img = Bytes::copy_from_slice(&bytes[9..]);
+
+        if img.len() == 0 {
+            return
+        }
+
+        for gui in self.video_routes.clone() {
+            if gui.1.0 == conn_id && gui.1.1 == camera_id {
+                self.gui_img_route.get(&gui.0).unwrap().send(img.clone()).unwrap();
+            }
+        }
+    }
+
     pub async fn run(mut self) -> io::Result<()> {
         while let Some(cmd) = self.cmd_rx.recv().await {
             match cmd {
-                Command::Connect { conn_tx, res_tx, side} => {
-                    let conn_id = self.connect(conn_tx, side).await;
+                Command::Connect { conn_tx, res_tx, side,img_tx} => {
+                    let conn_id = self.connect(conn_tx, img_tx, side ).await;
                     let _ = res_tx.send(conn_id);
                 }
 
@@ -529,6 +569,10 @@ impl Server {
                 Command::ForgetCamera {conn, target, side} => {
                     self.forget_camera(conn, target, side).await;
                 }
+
+                Command::RouteImage {conn, bytes} => {
+                    self.route_image(conn, bytes).await;
+                }
             }
         }
         Ok(())
@@ -541,11 +585,11 @@ pub struct ServerHandle {
 }
 
 impl ServerHandle {
-    pub async fn connect(&self, conn_tx: mpsc::UnboundedSender<Msg>, side: WSSide) -> ConnId {
+    pub async fn connect(&self, conn_tx: mpsc::UnboundedSender<Msg>, side: WSSide, img_tx: Option<mpsc::UnboundedSender<Bytes>>) -> ConnId {
         let (res_tx, res_rx) = oneshot::channel();
 
         self.cmd_tx
-            .send(Command::Connect { conn_tx, res_tx, side })
+            .send(Command::Connect { conn_tx, res_tx, side, img_tx })
             .unwrap();
 
         res_rx.await.unwrap()
@@ -605,5 +649,9 @@ impl ServerHandle {
 
     pub async fn forget_camera(&self, conn: ConnId, data: datatypes::ForgetCamera, side: WSSide) {
         self.cmd_tx.send(Command::ForgetCamera {conn, target: data, side}).unwrap();
+    }
+
+    pub async fn route_image(&self, conn: ConnId, bytes: Bytes) {
+        self.cmd_tx.send(Command::RouteImage {conn, bytes}).unwrap();
     }
 }
