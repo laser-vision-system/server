@@ -105,8 +105,6 @@ impl Server {
                 edge_sessions: HashMap::new(),
                 cameras: HashMap::new(),
                 video_routes: HashMap::new(),
-                cameras: HashMap::new(),
-                video_routes: HashMap::new(),
                 cmd_rx: rx
             },
             ServerHandle { cmd_tx: tx },
