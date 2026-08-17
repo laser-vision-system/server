@@ -94,10 +94,109 @@ async fn process_ws(
             edge_process(server, session, text, conn).await;
         },
         WSSide::GUI => {
-
+            gui_process(server, session, text, conn).await;
         }
     }
     //this should contain the actual logic to deal with incoming text strings from the websockets. Whether this needs to divide into edge and gui functions right away is tbd
+}
+
+async fn gui_process(
+    server: &ServerHandle,
+    session: &mut actix_ws::Session,
+    text: &str,
+    conn: ConnId
+) {
+    let msg = text.trim();
+
+    let mut args = msg.splitn(2, ':');
+
+    match args.next().unwrap() {
+        "ListCameras"  => {
+            server.list_cameras(conn).await;
+        }
+
+        "SetNameCamera"  => match args.next() {
+            Some(data) => {
+                let data_unchecked: Result<datatypes::GUISetNameCamera> = serde_json::from_str(data);
+                if(data_unchecked.is_ok()) {
+                    let json = data_unchecked.unwrap();
+                    server.set_name_camera(json).await;
+                }
+            }
+
+            None => {}
+        }
+
+        "StartViewingCamera"  => match args.next() {
+            Some(data) => {
+                let data_unchecked: Result<datatypes::GUIStartViewingCamera> = serde_json::from_str(data);
+                if(data_unchecked.is_ok()) {
+                    let json = data_unchecked.unwrap();
+                    server.start_viewing_camera(conn, json).await;
+                }
+            }
+
+            None => {}
+        }
+
+
+        "StopViewingCamera"  => {
+            server.stop_viewing_camera(conn).await;
+        }
+
+        "Setpoint" => match args.next() {
+            Some(data) => {
+                let data_unchecked: Result<datatypes::GUISetpoint> = serde_json::from_str(data);
+                if(data_unchecked.is_ok()) {
+                    let json = data_unchecked.unwrap();
+                    server.setpoint(Some(json)).await;
+                }
+            }
+
+            None => {
+                server.setpoint(None).await;
+            }
+        }
+
+        "ViewCameraConfig" => match args.next() {
+            Some(data) => {
+                let data_unchecked: Result<datatypes::ViewCameraConfig> = serde_json::from_str(data);
+                if(data_unchecked.is_ok()) {
+                    let json = data_unchecked.unwrap();
+                    server.view_camera_config(conn, json).await;
+                }
+            }
+
+            None => {}
+        }
+
+        "Configuration" => match args.next() {
+            Some(data) => {
+                let data_unchecked: Result<datatypes::Configuration> = serde_json::from_str(data);
+                if(data_unchecked.is_ok()) {
+                    let json = data_unchecked.unwrap();
+                    server.configuration(conn, json, WSSide::GUI).await;
+                }
+            }
+
+            None => {}
+        }
+
+        "ForgetCamera" => match args.next() {
+            Some(data) => {
+                let data_unchecked: Result<datatypes::ForgetCamera> = serde_json::from_str(data);
+                if(data_unchecked.is_ok()) {
+                    let json = data_unchecked.unwrap();
+                    server.forget_camera(conn, json, WSSide::GUI).await;
+                }
+            }
+            None => {}
+        }
+
+        _ => {
+
+        }
+    }
 }
 
 async fn edge_process(
@@ -114,10 +213,10 @@ async fn edge_process(
 
         "RegisterCamera" => match args.next() {
             Some(data) => {
-                let data_unchecked: Result<datatypes::RegisterCamera> = serde_json::from_str(data);
+                let data_unchecked: Result<datatypes::RegisterCameras> = serde_json::from_str(data);
                 if(data_unchecked.is_ok()) {
-                    let cameras = data_unchecked.unwrap();
-                    server.register_cameras(conn, cameras.cameras).await;
+                    let json = data_unchecked.unwrap();
+                    server.register_cameras(conn, json.cameras).await;
                 }
             }
 
@@ -130,14 +229,50 @@ async fn edge_process(
             Some(data) => {
                 let data_unchecked: Result<datatypes::UnregisterCamera> = serde_json::from_str(data);
                 if(data_unchecked.is_ok()) {
-                    let cameras = data_unchecked.unwrap();
-                    server.unregister_camera(conn, cameras.camera_id).await;
+                    let json = data_unchecked.unwrap();
+                    server.unregister_camera(conn, json.camera_id).await;
                 }
             }
 
             None => {
 
             }
+        }
+
+        "ImageAnalysis" => match args.next() {
+            Some(data) => {
+                let data_unchecked: Result<datatypes::ImageAnalysis> = serde_json::from_str(data);
+                if(data_unchecked.is_ok()) {
+                    let json = data_unchecked.unwrap();
+                    server.image_analysis(conn, json).await;
+                }
+            }
+            None => {
+
+            }
+        }
+
+        "Configuration" => match args.next() {
+            Some(data) => {
+                let data_unchecked: Result<datatypes::Configuration> = serde_json::from_str(data);
+                if(data_unchecked.is_ok()) {
+                    let json = data_unchecked.unwrap();
+                    server.configuration(conn, json, WSSide::Edge).await;
+                }
+            }
+
+            None => {}
+        }
+
+        "ForgetCamera" => match args.next() {
+            Some(data) => {
+                let data_unchecked: Result<datatypes::ForgetCamera> = serde_json::from_str(data);
+                if(data_unchecked.is_ok()) {
+                    let json = data_unchecked.unwrap();
+                    server.forget_camera(conn, json, WSSide::Edge).await;
+                }
+            }
+            None => {}
         }
 
         _ => {
