@@ -10,7 +10,7 @@ use rand::RngExt;
 use server_edge_datatypes as datatypes;
 use actix_web::web::Bytes;
 use serde_json;
-use server_edge_datatypes::{GUIImageAnalysis, GUISetpoint, StopViewingCamera, ViewCameraConfig};
+use server_edge_datatypes::{CameraState, GUIImageAnalysis, GUISetpoint, StopViewingCamera, ViewCameraConfig};
 use tokio::sync::mpsc::UnboundedSender;
 use crate::{ConnId, Msg, WSSide};
 
@@ -30,10 +30,15 @@ enum Command {
 
     RegisterCameras {
         conn: ConnId,
-        cameras: HashMap<u64, String>
+        cameras: HashMap<u64, (String, CameraState)>
     },
 
     UnregisterCamera {
+        conn: ConnId,
+        camera: u64
+    },
+
+    BreakCamera {
         conn: ConnId,
         camera: u64
     },
@@ -98,7 +103,7 @@ pub struct Server {
 
     edge_sessions: HashMap<ConnId, mpsc::UnboundedSender<Msg>>,
 
-    cameras: HashMap<(ConnId, u64), (String, bool)>,
+    cameras: HashMap<(ConnId, u64), (String, CameraState)>,
 
     video_routes: HashMap<ConnId, (ConnId, u64)>,
 
@@ -163,10 +168,11 @@ impl Server {
     fn is_connected(&self, conn_id: ConnId, camera: u64) -> bool {
         let camera_id = (conn_id, camera);
         if(self.cameras.contains_key(&camera_id)){
-            if(self.cameras[&camera_id].1){
-                return true;
-            }
-            return false;
+            match self.cameras.get(&camera_id).unwrap().1 {
+                CameraState::Active => true,
+
+                _ => false,
+            };
         }
         return false;
     }
@@ -182,24 +188,14 @@ impl Server {
         false
     }
 
-    async fn register_cameras(&mut self, conn: ConnId, cameras: HashMap<u64, String>) {
+    async fn register_cameras(&mut self, conn: ConnId, cameras: HashMap<u64, (String, CameraState)>) {
         for camera in cameras {
             let camera_id = camera.0;
             let camera_name = camera.1;
-            self.cameras.insert((conn, camera_id), (camera_name.clone(), true));
+            self.cameras.insert((conn, camera_id), camera_name);
 
-            let gui_struct = datatypes::CameraConnected {
-                conn_id: conn,
-                camera_id,
-                camera_name
-            };
-
-            let mut msg = "CameraConnected:".to_string();
-            let json = serde_json::to_string(&gui_struct).unwrap();
-            msg.push_str(&json);
-
-            for gui in self.gui_sessions.values() {
-                gui.send(msg.clone()).unwrap();
+            for gui in self.gui_sessions.clone().keys() {
+                self.list_cameras(gui.clone()).await;
             }
         }
     }
@@ -207,22 +203,21 @@ impl Server {
     async fn unregister_camera(&mut self, conn: ConnId, camera: u64) {
         let entry = self.cameras.get(&(conn, camera));
         let entry_2 = entry.unwrap();
-        self.cameras.insert((conn, camera), (entry_2.0.clone(), false));
+        self.cameras.insert((conn, camera), (entry_2.0.clone(), CameraState::Disconnected));
+        self.disconnect_camera(conn, camera).await;
+    }
+
+    async fn break_camera(&mut self, conn: ConnId, camera: u64) {
+        let entry = self.cameras.get(&(conn, camera));
+        let entry_2 = entry.unwrap();
+        self.cameras.insert((conn, camera), (entry_2.0.clone(), CameraState::Broken));
         self.disconnect_camera(conn, camera).await;
     }
 
     async fn disconnect_camera(&mut self, conn: ConnId, camera: u64) {
-        let gui_struct = datatypes::CameraDisconnected{
-            conn_id: conn,
-            camera_id: camera,
-        };
 
-        let mut msg = "CameraDisconnected:".to_string();
-        let json = serde_json::to_string(&gui_struct).unwrap();
-        msg.push_str(&json);
-
-        for gui in self.gui_sessions.values() {
-            gui.send(msg.clone()).unwrap();
+        for gui in self.gui_sessions.clone().keys() {
+            self.list_cameras(gui.clone()).await;
         }
 
         let mut remove: HashSet<ConnId> = HashSet::new();
@@ -452,9 +447,11 @@ impl Server {
             return
         }
 
-        if(!self.cameras[&camera].1){
-            return
-        }
+        match self.cameras.get(&camera).unwrap().1 {
+            CameraState::Active => { }
+
+            _ => { return}
+        };
 
         let mut msg = "ForgetCamera:".to_string();
         let send = datatypes::ForgetCamera{
@@ -466,15 +463,14 @@ impl Server {
 
         match side {
             WSSide::Edge => {
+                self.gui_sessions.get(&target.conn_id).unwrap().send(msg.clone()).unwrap();
+
                 if target.confirm == true {
                     self.cameras.remove(&camera);
-                    for gui in self.gui_sessions.values() {
-                        gui.send(msg.clone()).unwrap();
+                    for gui in self.gui_sessions.clone().keys() {
+                        self.list_cameras(gui.clone()).await;
                     }
-                } else {
-                    self.gui_sessions.get(&target.conn_id).unwrap().send(msg.clone()).unwrap();
                 }
-
             }
 
             WSSide::GUI => {
@@ -532,6 +528,10 @@ impl Server {
 
                 Command::UnregisterCamera { conn, camera } => {
                     self.unregister_camera(conn, camera).await;
+                }
+
+                Command::BreakCamera { conn, camera} => {
+                    self.break_camera(conn,camera).await;
                 }
 
                 Command::ImageAnalysis { conn, analysis } => {
@@ -599,12 +599,16 @@ impl ServerHandle {
         self.cmd_tx.send(Command::Disconnect {conn,side}).unwrap();
     }
 
-    pub async fn register_cameras(&self, conn: ConnId, cameras: HashMap<u64, String>) {
+    pub async fn register_cameras(&self, conn: ConnId, cameras: HashMap<u64, (String, CameraState)>) {
         self.cmd_tx.send(Command::RegisterCameras {conn,cameras}).unwrap();
     }
 
     pub async fn unregister_camera(&self, conn: ConnId, camera: u64) {
         self.cmd_tx.send(Command::UnregisterCamera {conn,camera}).unwrap();
+    }
+
+    pub async fn break_camera(&self, conn: ConnId, camera: u64) {
+        self.cmd_tx.send(Command::BreakCamera {conn,camera}).unwrap();
     }
 
     pub async fn image_analysis(&self, conn: ConnId, analysis: datatypes::ImageAnalysis) {

@@ -253,12 +253,26 @@ async fn edge_process(
             }
         }
 
-        "UnregisterCameras" => match args.next() {
+        "DisconnectCamera" => match args.next() {
             Some(data) => {
-                let data_unchecked: Result<datatypes::UnregisterCamera> = serde_json::from_str(data);
+                let data_unchecked: Result<datatypes::DisconnectCamera> = serde_json::from_str(data);
                 if(data_unchecked.is_ok()) {
                     let json = data_unchecked.unwrap();
                     server.unregister_camera(conn, json.camera_id).await;
+                }
+            }
+
+            None => {
+
+            }
+        }
+
+        "BreakCamera" => match args.next() {
+            Some(data) => {
+                let data_unchecked: Result<datatypes::BreakCamera> = serde_json::from_str(data);
+                if(data_unchecked.is_ok()) {
+                    let json = data_unchecked.unwrap();
+                    server.break_camera(conn, json.camera_id).await;
                 }
             }
 
