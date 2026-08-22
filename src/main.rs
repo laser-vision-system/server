@@ -10,7 +10,7 @@ use tokio::{
 };
 use self::server::{Server, ServerHandle};
 
-pub type ConnId = u64;
+pub type ConnId = u32;
 pub type Msg = String;
 
 #[derive(Debug, Clone, Copy)]
