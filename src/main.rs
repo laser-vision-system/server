@@ -1,5 +1,6 @@
 mod server;
 mod handler;
+mod restful;
 
 use std::io;
 use actix_files::NamedFile;
@@ -54,7 +55,6 @@ async fn edge_ws(
 }
 
 
-
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> io::Result<()> {
     let (server, server_tx) = Server::new();
@@ -66,6 +66,7 @@ async fn main() -> io::Result<()> {
             .app_data(web::Data::new(server_tx.clone()))
             .service(web::resource("/gui_ws").route(web::get().to(gui_ws)))
             .service(web::resource("/edge_ws").route(web::get().to(edge_ws)))
+            .configure(restful::restful_routes)
     })
         .workers(2)
         .bind(("127.0.0.1",8080))?
