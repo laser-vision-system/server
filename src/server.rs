@@ -4,23 +4,22 @@ use std::{
     collections::{HashMap, HashSet},
     io,
 };
-use std::io::Read;
-use env_logger::Target;
+
 use rand::RngExt;
 use server_edge_datatypes as datatypes;
 use actix_web::web::Bytes;
 use serde_json;
-use server_edge_datatypes::{CameraState, GUIImageAnalysis, GUISetpoint, StopViewingCamera, ViewCameraConfig};
+use server_edge_datatypes::{CameraState};
 use tokio::sync::mpsc::UnboundedSender;
 use crate::{ConnId, Msg, WSSide};
 
 #[derive(Debug)]
 enum Command {
     Connect {
-        conn_tx: mpsc::UnboundedSender<Msg>,
+        conn_tx: UnboundedSender<Msg>,
         res_tx: oneshot::Sender<ConnId>,
         side: WSSide,
-        img_tx: Option<mpsc::UnboundedSender<Bytes>>,
+        img_tx: Option<UnboundedSender<Bytes>>,
     },
 
     Disconnect {
@@ -97,11 +96,11 @@ enum Command {
 
 #[derive(Debug)]
 pub struct Server {
-    gui_sessions: HashMap<ConnId, mpsc::UnboundedSender<Msg>>,
+    gui_sessions: HashMap<ConnId, UnboundedSender<Msg>>,
 
-    gui_img_route: HashMap<ConnId, mpsc::UnboundedSender<Bytes>>,
+    gui_img_route: HashMap<ConnId, UnboundedSender<Bytes>>,
 
-    edge_sessions: HashMap<ConnId, mpsc::UnboundedSender<Msg>>,
+    edge_sessions: HashMap<ConnId, UnboundedSender<Msg>>,
 
     cameras: HashMap<(ConnId, u64), (String, CameraState)>,
 
@@ -126,7 +125,7 @@ impl Server {
         )
     }
 
-    async fn connect(&mut self, tx: mpsc::UnboundedSender<Msg>, img_tx: Option<mpsc::UnboundedSender<Bytes>>, side: WSSide) -> ConnId {
+    async fn connect(&mut self, tx: UnboundedSender<Msg>, img_tx: Option<UnboundedSender<Bytes>>, side: WSSide) -> ConnId {
         let id = rand::rng().random::<ConnId>();
         match side {
             WSSide::GUI => {
@@ -167,14 +166,14 @@ impl Server {
 
     fn is_connected(&self, conn_id: ConnId, camera: u64) -> bool {
         let camera_id = (conn_id, camera);
-        if(self.cameras.contains_key(&camera_id)){
+        if self.cameras.contains_key(&camera_id) {
             match self.cameras.get(&camera_id).unwrap().1 {
                 CameraState::Active => true,
 
                 _ => false,
             };
         }
-        return false;
+        false
     }
 
     fn camera_in_use(&self, conn_id: ConnId, camera: u64) -> bool {
@@ -251,7 +250,7 @@ impl Server {
 
     async fn set_point(&mut self, target: Option<datatypes::GUISetpoint>) {
         if let Some(target) = target {
-            if(self.is_connected(target.conn_id, target.camera_id)){
+            if self.is_connected(target.conn_id, target.camera_id){
                 self.send_set_point(target.conn_id, target.camera_id).await;
             }
         } else {
@@ -297,7 +296,7 @@ impl Server {
     }
 
     async fn set_name_camera(&mut self, conn_id: ConnId, camera: u64, name: String) {
-        if(!self.is_connected(conn_id, camera)){
+        if !self.is_connected(conn_id, camera){
             return
         }
 
@@ -315,12 +314,12 @@ impl Server {
     }
 
     async fn start_viewing_camera(&mut self, gui_conn: ConnId, edge_conn: ConnId, camera: u64) {
-        if(!self.is_connected(edge_conn, camera)){
+        if !self.is_connected(edge_conn, camera) {
             return;
         }
 
-        if(self.video_routes.contains_key(&gui_conn)){
-            if(self.video_routes[&gui_conn] == (edge_conn, camera)){
+        if self.video_routes.contains_key(&gui_conn) {
+            if self.video_routes[&gui_conn] == (edge_conn, camera) {
                 return;
             }
             self.stop_viewing_camera(gui_conn).await;
@@ -328,7 +327,7 @@ impl Server {
 
         let mut skip_camera_startup = false;
 
-        if(self.camera_in_use(edge_conn, camera)) {
+        if self.camera_in_use(edge_conn, camera) {
             skip_camera_startup = true;
         }
 
@@ -362,7 +361,7 @@ impl Server {
 
         let route = route.unwrap();
 
-        if(self.camera_in_use(route.0, route.1)){
+        if self.camera_in_use(route.0, route.1) {
             return;
         }
 
@@ -379,12 +378,12 @@ impl Server {
     async fn configuration(&mut self, conn: ConnId, config: datatypes::Configuration, side: WSSide) {
         match side {
             WSSide::GUI => {
-                if(!self.is_connected(config.conn_id, config.camera_id)){
+                if !self.is_connected(config.conn_id, config.camera_id) {
                     return
                 }
             }
             WSSide::Edge => {
-                if(!self.is_connected(conn, config.camera_id)){
+                if !self.is_connected(conn, config.camera_id) {
                     return
                 }
             }
@@ -411,7 +410,7 @@ impl Server {
     }
 
     async fn view_camera_config(&mut self, conn: ConnId, camera: datatypes::ViewCameraConfig) {
-        if(!self.is_connected(camera.conn_id, camera.camera_id)){
+        if !self.is_connected(camera.conn_id, camera.camera_id) {
             return
         }
 
@@ -436,14 +435,14 @@ impl Server {
 
             WSSide::Edge => {
                 camera = (conn, target.camera_id);
-                if(!self.gui_sessions.contains_key(&target.conn_id)){
-                    if(!target.confirm){
+                if !self.gui_sessions.contains_key(&target.conn_id) {
+                    if !target.confirm {
                         return
                     }
                 }
             }
         }
-        if(!self.cameras.contains_key(&camera)){
+        if !self.cameras.contains_key(&camera) {
             return
         }
 
@@ -581,11 +580,11 @@ impl Server {
 
 #[derive(Debug, Clone)]
 pub struct ServerHandle {
-    cmd_tx: mpsc::UnboundedSender<Command>
+    cmd_tx: UnboundedSender<Command>
 }
 
 impl ServerHandle {
-    pub async fn connect(&self, conn_tx: mpsc::UnboundedSender<Msg>, side: WSSide, img_tx: Option<mpsc::UnboundedSender<Bytes>>) -> ConnId {
+    pub async fn connect(&self, conn_tx: UnboundedSender<Msg>, side: WSSide, img_tx: Option<UnboundedSender<Bytes>>) -> ConnId {
         let (res_tx, res_rx) = oneshot::channel();
 
         self.cmd_tx
