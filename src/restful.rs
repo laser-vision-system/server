@@ -2,6 +2,7 @@ use std::collections::HashSet;
 use crate::file_manager::{fill_response, FileManagerHandle};
 use actix_web::{HttpResponse, Responder, get, post, web};
 use serde::Deserialize;
+use server_edge_datatypes as datatypes;
 
 pub fn restful_routes(config: &mut web::ServiceConfig) {
     config
@@ -20,24 +21,14 @@ async fn default_config(file_manager: web::Data<FileManagerHandle>) -> impl Resp
     fill_response(response)
 }
 
-#[derive(Deserialize)]
-struct Config {
-    json: String,
-}
-
 #[post("/write_default_config")]
-async fn write_default_config(file_manager: web::Data<FileManagerHandle>, json: web::Json<Config>) -> impl Responder {
+async fn write_default_config(file_manager: web::Data<FileManagerHandle>, json: web::Json<datatypes::restful::Config>) -> impl Responder {
     let response = file_manager.change_default_config(json.json.clone()).await;
     fill_response(response)
 }
 
-#[derive(Deserialize)]
-struct Logs {
-    logs: HashSet<String>
-}
-
 #[post("/edge_logs")]
-async fn edge_logs(file_manager: web::Data<FileManagerHandle>, json: web::Json<Logs>) -> impl Responder {
+async fn edge_logs(file_manager: web::Data<FileManagerHandle>, json: web::Json<datatypes::restful::Logs>) -> impl Responder {
     let response = file_manager.write_edge_logs(json.logs.clone()).await;
     fill_response(response)
 }

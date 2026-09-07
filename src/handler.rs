@@ -5,9 +5,10 @@ use actix_ws::{AggregatedMessage, CloseReason};
 use futures_util::StreamExt as _;
 use tokio::{sync::mpsc, time::interval};
 
-use crate::{ServerHandle, ConnId, WSSide};
+use crate::{ServerHandle, WSSide};
 use server_edge_datatypes as datatypes;
 use serde_json::Result;
+use datatypes::shared::{ConnId};
 
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(5);
 const CLIENT_TIMEOUT: Duration = Duration::from_secs(10);
@@ -142,7 +143,7 @@ async fn gui_process(
 
         "SetNameCamera"  => match args.next() {
             Some(data) => {
-                let data_unchecked: Result<datatypes::gui::GUISetNameCamera> = serde_json::from_str(data);
+                let data_unchecked: Result<datatypes::gui::SetNameCamera> = serde_json::from_str(data);
                 if data_unchecked.is_ok() {
                     let json = data_unchecked.unwrap();
                     server.set_name_camera(json).await;

@@ -13,7 +13,6 @@ use tokio::{
 use crate::file_manager::{FileManager, FileManagerHandle};
 use self::server::{Server, ServerHandle};
 
-pub type ConnId = u32;
 pub type Msg = String;
 
 #[derive(Debug, Clone, Copy)]
