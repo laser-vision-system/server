@@ -9,7 +9,7 @@ use rand::RngExt;
 use server_edge_datatypes as datatypes;
 use actix_web::web::Bytes;
 use serde_json;
-use server_edge_datatypes::{CameraState};
+use server_edge_datatypes::shared::{CameraState};
 use tokio::sync::mpsc::UnboundedSender;
 use crate::{ConnId, Msg, WSSide};
 
@@ -44,11 +44,11 @@ enum Command {
 
     ImageAnalysis {
         conn: ConnId,
-        analysis: datatypes::ImageAnalysis,
+        analysis: datatypes::edge::ImageAnalysis,
     },
 
     Setpoint {
-        target: Option<datatypes::GUISetpoint>
+        target: Option<datatypes::gui::Setpoint>
     },
 
     ListCameras {
@@ -73,18 +73,18 @@ enum Command {
 
     ViewCameraConfig{
         conn: ConnId,
-        camera: datatypes::ViewCameraConfig,
+        camera: datatypes::shared::ViewCameraConfig,
     },
 
     Configuration{
         conn: ConnId,
-        config: datatypes::Configuration,
+        config: datatypes::shared::Configuration,
         side: WSSide
     },
 
     ForgetCamera {
         conn: ConnId,
-        target: datatypes::ForgetCamera,
+        target: datatypes::shared::ForgetCamera,
         side: WSSide
     },
 
@@ -232,8 +232,8 @@ impl Server {
         }
     }
 
-    async fn image_analysis(&mut self, conn: ConnId, analysis: datatypes::ImageAnalysis) {
-        let gui_struct = datatypes::GUIImageAnalysis {
+    async fn image_analysis(&mut self, conn: ConnId, analysis: datatypes::edge::ImageAnalysis) {
+        let gui_struct = datatypes::gui::ImageAnalysis {
             conn_id: conn,
             camera_id: analysis.camera_id,
             deviation: analysis.deviation,
@@ -248,7 +248,7 @@ impl Server {
         }
     }
 
-    async fn set_point(&mut self, target: Option<datatypes::GUISetpoint>) {
+    async fn set_point(&mut self, target: Option<datatypes::gui::Setpoint>) {
         if let Some(target) = target {
             if self.is_connected(target.conn_id, target.camera_id){
                 self.send_set_point(target.conn_id, target.camera_id).await;
@@ -267,7 +267,7 @@ impl Server {
     }
 
     async fn send_set_point(&mut self, conn: ConnId, camera: u64) {
-        let edge_struct = datatypes::Setpoint {
+        let edge_struct = datatypes::edge::Setpoint {
             camera_id: camera,
         };
 
@@ -280,7 +280,7 @@ impl Server {
     }
 
     async fn list_cameras(&mut self, conn: ConnId) {
-        let gui_struct = datatypes::ListOfCameras{
+        let gui_struct = datatypes::gui::ListOfCameras{
             cameras: self.cameras.clone(),
         };
 
@@ -300,7 +300,7 @@ impl Server {
             return
         }
 
-        let edge_struct = datatypes::SetNameCamera {
+        let edge_struct = datatypes::edge::SetNameCamera {
             camera_id: camera,
             name
         };
@@ -337,7 +337,7 @@ impl Server {
             return;
         }
 
-        let edge_struct = datatypes::StartViewingCamera {
+        let edge_struct = datatypes::edge::StartViewingCamera {
             camera_id: camera,
         };
 
@@ -365,7 +365,7 @@ impl Server {
             return;
         }
 
-        let edge_struct = datatypes::StopViewingCamera{
+        let edge_struct = datatypes::edge::StopViewingCamera{
             camera_id: route.1
         };
         let mut msg = "StopViewingCamera:".to_string();
@@ -375,7 +375,7 @@ impl Server {
         target.send(msg.clone()).unwrap();
     }
 
-    async fn configuration(&mut self, conn: ConnId, config: datatypes::Configuration, side: WSSide) {
+    async fn configuration(&mut self, conn: ConnId, config: datatypes::shared::Configuration, side: WSSide) {
         match side {
             WSSide::GUI => {
                 if !self.is_connected(config.conn_id, config.camera_id) {
@@ -389,7 +389,7 @@ impl Server {
             }
         }
 
-        let fwd_config: datatypes::Configuration = datatypes::Configuration{
+        let fwd_config: datatypes::shared::Configuration = datatypes::shared::Configuration{
             conn_id: conn,
             camera_id: config.camera_id,
             configuration: config.configuration,
@@ -409,12 +409,12 @@ impl Server {
         target.send(msg.clone()).unwrap();
     }
 
-    async fn view_camera_config(&mut self, conn: ConnId, camera: datatypes::ViewCameraConfig) {
+    async fn view_camera_config(&mut self, conn: ConnId, camera: datatypes::shared::ViewCameraConfig) {
         if !self.is_connected(camera.conn_id, camera.camera_id) {
             return
         }
 
-        let fwd_data: datatypes::ViewCameraConfig = datatypes::ViewCameraConfig{
+        let fwd_data: datatypes::shared::ViewCameraConfig = datatypes::shared::ViewCameraConfig{
             conn_id: conn,
             camera_id: camera.camera_id,
         };
@@ -426,7 +426,7 @@ impl Server {
         target.send(msg.clone()).unwrap();
     }
 
-    async fn forget_camera(&mut self, conn: ConnId, target: datatypes::ForgetCamera, side: WSSide) {
+    async fn forget_camera(&mut self, conn: ConnId, target: datatypes::shared::ForgetCamera, side: WSSide) {
         let camera: (ConnId, u64);
         match side {
             WSSide::GUI => {
@@ -453,7 +453,7 @@ impl Server {
         };
 
         let mut msg = "ForgetCamera:".to_string();
-        let send = datatypes::ForgetCamera{
+        let send = datatypes::shared::ForgetCamera{
             conn_id: conn,
             camera_id: target.camera_id,
             confirm: target.confirm,
@@ -610,11 +610,11 @@ impl ServerHandle {
         self.cmd_tx.send(Command::BreakCamera {conn,camera}).unwrap();
     }
 
-    pub async fn image_analysis(&self, conn: ConnId, analysis: datatypes::ImageAnalysis) {
+    pub async fn image_analysis(&self, conn: ConnId, analysis: datatypes::edge::ImageAnalysis) {
         self.cmd_tx.send(Command::ImageAnalysis {conn,analysis}).unwrap();
     }
 
-    pub async fn setpoint(&self, target: Option<datatypes::GUISetpoint>){
+    pub async fn setpoint(&self, target: Option<datatypes::gui::Setpoint>){
         self.cmd_tx.send(Command::Setpoint {target}).unwrap();
     }
 
@@ -622,7 +622,7 @@ impl ServerHandle {
         self.cmd_tx.send(Command::ListCameras{conn}).unwrap();
     }
 
-    pub async fn set_name_camera(&self, data: datatypes::GUISetNameCamera) {
+    pub async fn set_name_camera(&self, data: datatypes::gui::GUISetNameCamera) {
         self.cmd_tx.send(Command::SetNameCamera {
             conn: data.conn_id,
             camera: data.camera_id,
@@ -630,7 +630,7 @@ impl ServerHandle {
         }).unwrap();
     }
 
-    pub async fn start_viewing_camera(&self, conn: ConnId, data: datatypes::GUIStartViewingCamera) {
+    pub async fn start_viewing_camera(&self, conn: ConnId, data: datatypes::gui::StartViewingCamera) {
         self.cmd_tx.send(Command::StartViewingCamera {
             gui_conn: conn,
             edge_conn: data.conn_id,
@@ -642,15 +642,15 @@ impl ServerHandle {
         self.cmd_tx.send(Command::StopViewingCamera {conn}).unwrap();
     }
 
-    pub async fn configuration(&self, conn: ConnId, data: datatypes::Configuration, side: WSSide) {
+    pub async fn configuration(&self, conn: ConnId, data: datatypes::shared::Configuration, side: WSSide) {
         self.cmd_tx.send(Command::Configuration {conn, config: data ,side}).unwrap();
     }
 
-    pub async fn view_camera_config(&self, conn: ConnId, data: datatypes::ViewCameraConfig) {
+    pub async fn view_camera_config(&self, conn: ConnId, data: datatypes::shared::ViewCameraConfig) {
         self.cmd_tx.send(Command::ViewCameraConfig {conn, camera: data}).unwrap();
     }
 
-    pub async fn forget_camera(&self, conn: ConnId, data: datatypes::ForgetCamera, side: WSSide) {
+    pub async fn forget_camera(&self, conn: ConnId, data: datatypes::shared::ForgetCamera, side: WSSide) {
         self.cmd_tx.send(Command::ForgetCamera {conn, target: data, side}).unwrap();
     }
 
