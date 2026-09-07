@@ -1,7 +1,5 @@
-use std::collections::HashSet;
 use crate::file_manager::{fill_response, FileManagerHandle};
 use actix_web::{HttpResponse, Responder, get, post, web};
-use serde::Deserialize;
 use server_edge_datatypes as datatypes;
 
 pub fn restful_routes(config: &mut web::ServiceConfig) {

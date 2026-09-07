@@ -219,6 +219,41 @@ async fn gui_process(
             None => {}
         }
 
+        "SetCameraThresholds" => match args.next() {
+            Some(data) => {
+                let data_unchecked: Result<datatypes::gui::SetCameraThresholds> = serde_json::from_str(data);
+                if data_unchecked.is_ok()  {
+                    let json = data_unchecked.unwrap();
+                    server.set_camera_thresholds(json).await;
+                }
+            }
+            None => {}
+        }
+
+        "SetDefaultThreshold" => match args.next() {
+            Some(data) => {
+                let data_unchecked: Result<datatypes::gui::SetDefaultThreshold> = serde_json::from_str(data);
+                if data_unchecked.is_ok()  {
+                    let json = data_unchecked.unwrap();
+                    server.set_default_thresholds(json).await;
+                }
+            }
+
+            None => {}
+        }
+
+        "SetEdgeProcessingType" => match args.next() {
+            Some(data) => {
+                let data_unchecked: Result<datatypes::gui::SetEdgeProcessingType> = serde_json::from_str(data);
+                if data_unchecked.is_ok()  {
+                    let json = data_unchecked.unwrap();
+                    server.set_edge_processing_type(conn, json).await;
+                }
+            }
+
+            None => {}
+        }
+
         _ => {
 
         }

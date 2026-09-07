@@ -93,6 +93,19 @@ enum Command {
     RouteImage {
         conn: ConnId,
         bytes: Bytes,
+    },
+
+    SetCameraThresholds {
+        data: datatypes::gui::SetCameraThresholds,
+    },
+
+    SetDefaultThresholds {
+        data: datatypes::gui::SetDefaultThreshold,
+    },
+
+    SetEdgeProcessingType {
+        conn: ConnId,
+        data: datatypes::gui::SetEdgeProcessingType,
     }
 }
 
@@ -551,6 +564,42 @@ impl Server {
         }
     }
 
+    async fn set_camera_thresholds(&mut self, data: datatypes::gui::SetCameraThresholds){
+        if self.cameras.contains_key(&(data.edge_id, data.camera_id)) {
+            let old_details = self.cameras.get(&(data.edge_id, data.camera_id)).unwrap();
+            let new_details = CameraDetails {
+                name: old_details.name.clone(),
+                state: old_details.state.clone(),
+                warn_below_threshold: data.warn_below_threshold,
+                alert_below_threshold: data.alert_below_threshold,
+            };
+            self.cameras.insert((data.edge_id, data.camera_id), new_details);
+
+            for gui in self.gui_sessions.clone().keys() {
+                self.list_cameras(gui.clone()).await;
+            }
+        }
+    }
+
+    async fn set_default_thresholds(&mut self, data: datatypes::gui::SetDefaultThreshold) {
+        self.default_warn_threshold = data.warn_below_threshold;
+        self.default_alert_threshold = data.alert_below_threshold;
+    }
+
+    async fn set_edge_processing(&mut self, conn_id: ConnId, data: datatypes::gui::SetEdgeProcessingType) {
+        let mut msg = "SetProcessingType:".to_string();
+        let send = datatypes::edge::SetProcessingType {
+            processing_type: data.processing_type,
+        };
+        msg.push_str(&*serde_json::to_string(&send).unwrap());
+
+        let target = self.gui_sessions.get(&conn_id);
+
+        if let Some(target) = target {
+            target.send(msg.clone()).unwrap();
+        }
+    }
+
     pub async fn run(mut self) -> io::Result<()> {
         while let Some(cmd) = self.cmd_rx.recv().await {
             match cmd {
@@ -613,6 +662,18 @@ impl Server {
 
                 Command::RouteImage {conn, bytes} => {
                     self.route_image(conn, bytes).await;
+                }
+
+                Command::SetCameraThresholds {data} => {
+                    self.set_camera_thresholds(data).await;
+                }
+
+                Command::SetDefaultThresholds {data} => {
+                    self.set_default_thresholds(data).await;
+                }
+
+                Command::SetEdgeProcessingType {conn, data} => {
+                    self.set_edge_processing(conn, data).await;
                 }
             }
         }
@@ -698,5 +759,17 @@ impl ServerHandle {
 
     pub async fn route_image(&self, conn: ConnId, bytes: Bytes) {
         self.cmd_tx.send(Command::RouteImage {conn, bytes}).unwrap();
+    }
+
+    pub async fn set_camera_thresholds(&self, data: datatypes::gui::SetCameraThresholds) {
+        self.cmd_tx.send(Command::SetCameraThresholds {data}).unwrap();
+    }
+
+    pub async fn set_default_thresholds(&self, data: datatypes::gui::SetDefaultThreshold) {
+        self.cmd_tx.send(Command::SetDefaultThresholds {data}).unwrap();
+    }
+
+    pub async fn set_edge_processing_type(&self, conn: ConnId, data: datatypes::gui::SetEdgeProcessingType) {
+        self.cmd_tx.send(Command::SetEdgeProcessingType {conn,data}).unwrap();
     }
 }
