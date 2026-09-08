@@ -106,6 +106,10 @@ enum Command {
     SetEdgeProcessingType {
         conn: ConnId,
         data: datatypes::gui::SetEdgeProcessingType,
+    },
+
+    GetDefaultThresholds {
+        conn: ConnId,
     }
 }
 
@@ -600,6 +604,20 @@ impl Server {
         }
     }
 
+    async fn get_default_thresholds(&mut self, conn_id: ConnId) {
+        let mut msg = "DefaultThresholds:".to_string();
+        let send = datatypes::gui::DefaultThresholds {
+            warn_below_threshold: self.default_warn_threshold,
+            alert_below_threshold: self.default_alert_threshold,
+        };
+        msg.push_str(&*serde_json::to_string(&send).unwrap());
+        let target = self.gui_sessions.get(&conn_id);
+
+        if let Some(target) = target {
+            target.send(msg.clone()).unwrap();
+        }
+    }
+
     pub async fn run(mut self) -> io::Result<()> {
         while let Some(cmd) = self.cmd_rx.recv().await {
             match cmd {
@@ -674,6 +692,10 @@ impl Server {
 
                 Command::SetEdgeProcessingType {conn, data} => {
                     self.set_edge_processing(conn, data).await;
+                }
+
+                Command::GetDefaultThresholds {conn} => {
+                    self.get_default_thresholds(conn).await;
                 }
             }
         }
@@ -771,5 +793,9 @@ impl ServerHandle {
 
     pub async fn set_edge_processing_type(&self, conn: ConnId, data: datatypes::gui::SetEdgeProcessingType) {
         self.cmd_tx.send(Command::SetEdgeProcessingType {conn,data}).unwrap();
+    }
+
+    pub async fn get_default_thresholds(&self, conn: ConnId) {
+        self.cmd_tx.send(Command::GetDefaultThresholds {conn}).unwrap();
     }
 }

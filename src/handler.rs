@@ -61,6 +61,7 @@ pub async fn ws_handler(
                     }
 
                     AggregatedMessage::Text(text) => {
+                        last_heartbeat = Instant::now();
                         process_ws(&server, &text, conn_id, side)
                             .await;
                     }
@@ -252,6 +253,10 @@ async fn gui_process(
             }
 
             None => {}
+        }
+
+        "GetDefaultThresholds"  =>  {
+            server.get_default_thresholds(conn).await;
         }
 
         _ => {
