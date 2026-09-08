@@ -10,8 +10,8 @@ use server_edge_datatypes as datatypes;
 use serde_json::Result;
 use datatypes::shared::{ConnId};
 
-const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(5);
-const CLIENT_TIMEOUT: Duration = Duration::from_secs(10);
+const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(2);
+const CLIENT_TIMEOUT: Duration = Duration::from_secs(5);
 
 //generic websocket handler - can process both edge and GUI websockets, although it may not be generic enough to handle images.
 pub async fn ws_handler(
@@ -40,6 +40,16 @@ pub async fn ws_handler(
     }
 
     let conn_id = server.connect(conn_tx, side, send_img_tx).await;
+
+    match side {
+        WSSide::GUI => {
+            println!("GUI connected: {}", conn_id)
+        }
+
+        WSSide::Edge => {
+            println!("Edge connected: {}", conn_id)
+        }
+    }
 
     let mut msg_stream = msg_stream
         .max_frame_size(128 * 1024)
@@ -85,6 +95,15 @@ pub async fn ws_handler(
 
             //Sends any text input to the conn_tx sender back to the client
             Some(chat_msg) = conn_rx.recv() => {
+                match side {
+                    WSSide::GUI => {
+                        println!("Sent to GUI: {}", chat_msg);
+                    }
+
+                    WSSide::Edge => {
+                        println!("Sent to Edge: {}", chat_msg);
+                    }
+                }
                  session.text(chat_msg).await.unwrap();
             }
 
@@ -106,7 +125,17 @@ pub async fn ws_handler(
         }
     };
 
-    let _ = server.disconnect(conn_id, side);
+    match side {
+        WSSide::GUI => {
+            println!("GUI disconnected: {}", conn_id)
+        }
+
+        WSSide::Edge => {
+            println!("Edge disconnected: {}", conn_id)
+        }
+    }
+
+    server.disconnect(conn_id, side).await;
 
     let _ = session.close(close_reason).await;
 }
@@ -135,6 +164,8 @@ async fn gui_process(
 ) {
     let msg = text.trim();
 
+    println!("Received from GUI: {}", msg);
+
     let mut args = msg.splitn(2, ':');
 
     match args.next().unwrap() {
@@ -142,6 +173,9 @@ async fn gui_process(
             server.list_cameras(conn).await;
         }
 
+        "ListEdges" => {
+            server.list_edges(conn).await;
+        }
         "SetNameCamera"  => match args.next() {
             Some(data) => {
                 let data_unchecked: Result<datatypes::gui::SetNameCamera> = serde_json::from_str(data);
@@ -272,11 +306,12 @@ async fn edge_process(
 ) {
     let msg = text.trim();
 
-    let mut args = msg.splitn(2, ':');
+    println!("Received from Edge: {}", msg);
 
+    let mut args = msg.splitn(2, ':');
     match args.next().unwrap() {
 
-        "RegisterCamera" => match args.next() {
+        "RegisterCameras" => match args.next() {
             Some(data) => {
                 let data_unchecked: Result<datatypes::edge::RegisterCameras> = serde_json::from_str(data);
                 if data_unchecked.is_ok()  {

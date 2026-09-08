@@ -28,6 +28,7 @@ async fn gui_ws(
 ) -> Result<HttpResponse, Error> {
     let (res, session, msg_stream) = actix_ws::handle(&req, stream)?;
 
+    println!("GUI connection!");
     spawn_local(handler::ws_handler(
         (**server).clone(),
         session,
@@ -44,6 +45,8 @@ async fn edge_ws(
     server: web::Data<ServerHandle>,
 ) -> Result<HttpResponse, Error> {
     let (res, session, msg_stream) = actix_ws::handle(&req, stream)?;
+
+    println!("Edge connection!");
     spawn_local(handler::ws_handler(
         (**server).clone(),
         session,
@@ -72,9 +75,9 @@ async fn main() -> io::Result<()> {
             .configure(restful::restful_routes)
     })
         .workers(2)
-        .bind(("127.0.0.1",8080))?
+        .bind(("0.0.0.0",8080))?
         .run();
-
+    println!("HTTP server running on 0.0.0.0:8080");
     try_join!(http_server, async move { server.await.unwrap() }, async move { file_manager.await.unwrap() })?;
 
     Ok(())
