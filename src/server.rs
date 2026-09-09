@@ -110,8 +110,13 @@ enum Command {
 
     GetDefaultThresholds {
         conn: ConnId,
+    },
+
+    ListEdges {
+        conn: ConnId,
     }
 }
+
 
 #[derive(Debug)]
 pub struct Server {
@@ -120,6 +125,8 @@ pub struct Server {
     gui_img_route: HashMap<ConnId, UnboundedSender<Bytes>>,
 
     edge_sessions: HashMap<ConnId, UnboundedSender<Msg>>,
+
+    edge_names: HashMap<ConnId, String>,
 
     cameras: HashMap<(ConnId, CameraId), CameraDetails>,
 
@@ -140,6 +147,7 @@ impl Server {
                 gui_sessions: HashMap::new(),
                 gui_img_route: HashMap::new(),
                 edge_sessions: HashMap::new(),
+                edge_names: HashMap::new(),
                 cameras: HashMap::new(),
                 video_routes: HashMap::new(),
                 default_warn_threshold: 0.9,
@@ -159,6 +167,10 @@ impl Server {
             }
             WSSide::Edge => {
                 self.edge_sessions.insert(id, tx);
+                self.edge_names.insert(id, format!("Edge {}", self.edge_names.len().to_string()));
+                for gui in self.gui_sessions.clone().keys() {
+                    self.list_edges(*gui).await;
+                }
             }
         }
 
@@ -174,17 +186,20 @@ impl Server {
 
                 for camera in self.cameras.keys() {
                     if camera.0 == conn_id {
+                        println!("disconnecting camera {}", camera.1);
                         cameras.insert(camera.clone());
                     }
                 }
 
                 for camera in cameras {
-                    self.disconnect_camera(camera.0, camera.1).await;
+                    self.unregister_camera(camera.0, camera.1).await;
                 }
 
             }
             WSSide::GUI => {
+                self.stop_viewing_camera(conn_id).await;
                 self.gui_sessions.remove(&conn_id);
+                self.gui_img_route.remove(&conn_id);
             }
         }
     }
@@ -339,8 +354,15 @@ impl Server {
     }
 
     async fn list_cameras(&mut self, conn: ConnId) {
+        let mut cameras_sendable: HashMap<String, CameraDetails> = HashMap::new();
+
+        for camera in self.cameras.clone() {
+            let key = format!("{:?}", camera.0);
+            cameras_sendable.insert(key, camera.1);
+        }
+
         let gui_struct = datatypes::gui::ListOfCameras{
-            cameras: self.cameras.clone(),
+            cameras: cameras_sendable,
         };
 
         let mut msg = "ListOfCameras:".to_string();
@@ -618,8 +640,23 @@ impl Server {
         }
     }
 
+    pub async fn list_edges(&mut self, conn_id: ConnId) {
+        let mut msg = "ListOfEdges:".to_string();
+        let send = datatypes::gui::ListOfEdges {
+            edges: self.edge_names.clone()
+        };
+        msg.push_str(&*serde_json::to_string(&send).unwrap());
+        let target = self.gui_sessions.get(&conn_id);
+        if let Some(target) = target {
+            target.send(msg.clone()).unwrap();
+        }
+
+    }
+
     pub async fn run(mut self) -> io::Result<()> {
         while let Some(cmd) = self.cmd_rx.recv().await {
+            println!("{:?}", cmd);
+
             match cmd {
                 Command::Connect { conn_tx, res_tx, side,img_tx} => {
                     let conn_id = self.connect(conn_tx, img_tx, side ).await;
@@ -696,6 +733,10 @@ impl Server {
 
                 Command::GetDefaultThresholds {conn} => {
                     self.get_default_thresholds(conn).await;
+                }
+
+                Command::ListEdges {conn } => {
+                    self.list_edges(conn).await;
                 }
             }
         }
@@ -797,5 +838,9 @@ impl ServerHandle {
 
     pub async fn get_default_thresholds(&self, conn: ConnId) {
         self.cmd_tx.send(Command::GetDefaultThresholds {conn}).unwrap();
+    }
+
+    pub async fn list_edges(&self, conn: ConnId) {
+        self.cmd_tx.send(Command::ListEdges{conn}).unwrap();
     }
 }
