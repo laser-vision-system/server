@@ -253,9 +253,9 @@ async fn gui_process(
             None => {}
         }
 
-        "ForgetCamera" => match args.next() {
+        "ForgetCameraRequest" => match args.next() {
             Some(data) => {
-                let data_unchecked: Result<datatypes::shared::ForgetCamera> = serde_json::from_str(data);
+                let data_unchecked: Result<datatypes::shared::ForgetCameraRequest> = serde_json::from_str(data);
                 if data_unchecked.is_ok()  {
                     let json = data_unchecked.unwrap();
                     server.forget_camera(conn, json, WSSide::GUI).await;
@@ -337,24 +337,10 @@ async fn edge_process(
 
         "DisconnectCamera" => match args.next() {
             Some(data) => {
-                let data_unchecked: Result<datatypes::edge::DisconnectCamera> = serde_json::from_str(data);
+                let data_unchecked: Result<datatypes::edge::UpdateCameraStatus> = serde_json::from_str(data);
                 if data_unchecked.is_ok()  {
                     let json = data_unchecked.unwrap();
                     server.unregister_camera(conn, json.camera_id).await;
-                }
-            }
-
-            None => {
-
-            }
-        }
-
-        "BreakCamera" => match args.next() {
-            Some(data) => {
-                let data_unchecked: Result<datatypes::edge::BreakCamera> = serde_json::from_str(data);
-                if data_unchecked.is_ok()  {
-                    let json = data_unchecked.unwrap();
-                    server.break_camera(conn, json.camera_id).await;
                 }
             }
 
@@ -388,9 +374,9 @@ async fn edge_process(
             None => {}
         }
 
-        "ForgetCamera" => match args.next() {
+        "ForgetCameraRequest" => match args.next() {
             Some(data) => {
-                let data_unchecked: Result<datatypes::shared::ForgetCamera> = serde_json::from_str(data);
+                let data_unchecked: Result<datatypes::shared::ForgetCameraRequest> = serde_json::from_str(data);
                 if data_unchecked.is_ok()  {
                     let json = data_unchecked.unwrap();
                     server.forget_camera(conn, json, WSSide::Edge).await;

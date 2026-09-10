@@ -8,7 +8,7 @@ use rand::RngExt;
 use server_edge_datatypes as datatypes;
 use actix_web::web::Bytes;
 use serde_json;
-use server_edge_datatypes::shared::{CameraState, Deviation};
+use server_edge_datatypes::shared::{CameraStatus, Deviation};
 use tokio::sync::mpsc::UnboundedSender;
 use crate::{Msg, WSSide};
 use datatypes::shared::{ConnId, CameraId};
@@ -31,7 +31,7 @@ enum Command {
 
     RegisterCameras {
         conn: ConnId,
-        cameras: HashMap<CameraId, (String, CameraState)>
+        cameras: HashMap<CameraId, datatypes::edge::NewCameraInfo>
     },
 
     UnregisterCamera {
@@ -86,7 +86,7 @@ enum Command {
 
     ForgetCamera {
         conn: ConnId,
-        target: datatypes::shared::ForgetCamera,
+        target: datatypes::shared::ForgetCameraRequest,
         side: WSSide
     },
 
@@ -223,7 +223,7 @@ impl Server {
         if self.cameras.contains_key(&camera_id) {
             println!("match!");
             match self.cameras.get(&camera_id).unwrap().state {
-                CameraState::Active => {
+                CameraStatus::Active => {
                     println!("active");
                     return true;
                 },
@@ -245,7 +245,7 @@ impl Server {
         false
     }
 
-    async fn register_cameras(&mut self, conn: ConnId, cameras: HashMap<CameraId, (String, CameraState)>) {
+    async fn register_cameras(&mut self, conn: ConnId, cameras: HashMap<CameraId, datatypes::edge::NewCameraInfo>) {
         for camera in cameras {
 
             let camera_id = camera.0;
@@ -260,8 +260,8 @@ impl Server {
             }
 
             let camera_details = CameraDetails {
-                name: camera.1.0,
-                state: camera.1.1,
+                name: camera.1.name,
+                state: camera.1.status,
                 warn_below_threshold,
                 alert_below_threshold,
             };
@@ -281,7 +281,7 @@ impl Server {
         let details = get_details.unwrap();
         let new_details = CameraDetails {
             name: details.name.clone(),
-            state: CameraState::Disconnected,
+            state: CameraStatus::Disconnected,
             warn_below_threshold: details.warn_below_threshold,
             alert_below_threshold: details.alert_below_threshold
         };
@@ -297,7 +297,7 @@ impl Server {
         let details = get_details.unwrap();
         let new_details = CameraDetails {
             name: details.name.clone(),
-            state: CameraState::Broken,
+            state: CameraStatus::Broken,
             warn_below_threshold: details.warn_below_threshold,
             alert_below_threshold: details.alert_below_threshold
         };
@@ -329,7 +329,6 @@ impl Server {
             conn_id: conn.to_string(),
             camera_id: analysis.camera_id,
             deviation: analysis.deviation,
-            intensity: analysis.intensity,
         };
         let mut msg = "ImageAnalysis:".to_string();
         let json = serde_json::to_string(&gui_struct).unwrap();
@@ -499,18 +498,19 @@ impl Server {
         let target: &UnboundedSender<Msg>;
         match side {
             WSSide::GUI => {
-                let fwd_config = datatypes::shared::Configuration{
-                    conn_id: conn,
+                let fwd_config = datatypes::gui::Configuration{
+                    conn_id: conn.to_string(),
                     camera_id: config.camera_id,
                     configuration: config.configuration,
                 };
+
                 let json = serde_json::to_string(&fwd_config).unwrap();
                 msg.push_str(&json);
                 target = self.edge_sessions.get(&config.conn_id).unwrap();
             }
             WSSide::Edge => {
-                let fwd_config = datatypes::gui::Configuration{
-                    conn_id: conn.to_string(),
+                let fwd_config = datatypes::shared::Configuration{
+                    conn_id: conn,
                     camera_id: config.camera_id,
                     configuration: config.configuration,
                 };
@@ -539,7 +539,7 @@ impl Server {
         target.send(msg.clone()).unwrap();
     }
 
-    async fn forget_camera(&mut self, conn: ConnId, target: datatypes::shared::ForgetCamera, side: WSSide) {
+    async fn forget_camera(&mut self, conn: ConnId, target: datatypes::shared::ForgetCameraRequest, side: WSSide) {
         let camera: UniqueCameraID;
         match side {
             WSSide::GUI => {
@@ -560,7 +560,7 @@ impl Server {
         }
 
         match self.cameras.get(&camera).unwrap().state {
-            CameraState::Active => { }
+            CameraStatus::Active => { }
 
             _ => { return}
         };
@@ -569,8 +569,8 @@ impl Server {
 
         match side {
             WSSide::Edge => {
-                let send = datatypes::gui::ForgetCamera{
-                    conn_id: conn.to_string(),
+                let send = datatypes::shared::ForgetCameraRequest{
+                    conn_id: conn,
                     camera_id: target.camera_id,
                     confirm: target.confirm,
                 };
@@ -586,8 +586,8 @@ impl Server {
             }
 
             WSSide::GUI => {
-                let send = datatypes::shared::ForgetCamera{
-                    conn_id: conn,
+                let send = datatypes::gui::ForgetCamera{
+                    conn_id: conn.to_string(),
                     camera_id: target.camera_id,
                     confirm: target.confirm,
                 };
@@ -804,7 +804,7 @@ impl ServerHandle {
         self.cmd_tx.send(Command::Disconnect {conn,side}).unwrap();
     }
 
-    pub async fn register_cameras(&self, conn: ConnId, cameras: HashMap<CameraId, (String, CameraState)>) {
+    pub async fn register_cameras(&self, conn: ConnId, cameras: HashMap<CameraId, datatypes::edge::NewCameraInfo>) {
         self.cmd_tx.send(Command::RegisterCameras {conn,cameras}).unwrap();
     }
 
@@ -856,7 +856,7 @@ impl ServerHandle {
         self.cmd_tx.send(Command::ViewCameraConfig {conn, camera: data}).unwrap();
     }
 
-    pub async fn forget_camera(&self, conn: ConnId, data: datatypes::shared::ForgetCamera, side: WSSide) {
+    pub async fn forget_camera(&self, conn: ConnId, data: datatypes::shared::ForgetCameraRequest, side: WSSide) {
         self.cmd_tx.send(Command::ForgetCamera {conn, target: data, side}).unwrap();
     }
 
