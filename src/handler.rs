@@ -52,7 +52,7 @@ pub async fn ws_handler(
     }
 
     let mut msg_stream = msg_stream
-        .max_frame_size(128 * 1024)
+        .max_frame_size(20 * 1024 * 1024)
         .aggregate_continuations()
         .max_continuation_size(2 * 1024 * 1024);
 
@@ -108,12 +108,22 @@ pub async fn ws_handler(
             }
 
             Some(img_data) = img_rx.recv() => {
+                println!("Routing image to: {:?}", conn_id);
                 session.binary(img_data).await.unwrap();
             }
 
             //keeps track of timeout conditions
             _ = interval.tick() => {
                 if Instant::now().duration_since(last_heartbeat) > CLIENT_TIMEOUT {
+                        match side {
+                            WSSide::GUI => {
+                                println!("GUI timed out: {}", conn_id)
+                            }
+
+                            WSSide::Edge => {
+                                println!("Edge timed out: {}", conn_id)
+                            }
+                        }
                     break None;
                 }
                 let _ = session.ping(b"").await;
