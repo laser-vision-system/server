@@ -52,7 +52,7 @@ pub async fn ws_handler(
     }
 
     let mut msg_stream = msg_stream
-        .max_frame_size(128 * 1024)
+        .max_frame_size(20 * 1024 * 1024)
         .aggregate_continuations()
         .max_continuation_size(2 * 1024 * 1024);
 
@@ -108,12 +108,22 @@ pub async fn ws_handler(
             }
 
             Some(img_data) = img_rx.recv() => {
+                println!("Routing image to: {:?}", conn_id);
                 session.binary(img_data).await.unwrap();
             }
 
             //keeps track of timeout conditions
             _ = interval.tick() => {
                 if Instant::now().duration_since(last_heartbeat) > CLIENT_TIMEOUT {
+                        match side {
+                            WSSide::GUI => {
+                                println!("GUI timed out: {}", conn_id)
+                            }
+
+                            WSSide::Edge => {
+                                println!("Edge timed out: {}", conn_id)
+                            }
+                        }
                     break None;
                 }
                 let _ = session.ping(b"").await;
@@ -243,9 +253,9 @@ async fn gui_process(
             None => {}
         }
 
-        "ForgetCamera" => match args.next() {
+        "ForgetCameraRequest" => match args.next() {
             Some(data) => {
-                let data_unchecked: Result<datatypes::shared::ForgetCamera> = serde_json::from_str(data);
+                let data_unchecked: Result<datatypes::shared::ForgetCameraRequest> = serde_json::from_str(data);
                 if data_unchecked.is_ok()  {
                     let json = data_unchecked.unwrap();
                     server.forget_camera(conn, json, WSSide::GUI).await;
@@ -327,24 +337,10 @@ async fn edge_process(
 
         "DisconnectCamera" => match args.next() {
             Some(data) => {
-                let data_unchecked: Result<datatypes::edge::DisconnectCamera> = serde_json::from_str(data);
+                let data_unchecked: Result<datatypes::edge::UpdateCameraStatus> = serde_json::from_str(data);
                 if data_unchecked.is_ok()  {
                     let json = data_unchecked.unwrap();
                     server.unregister_camera(conn, json.camera_id).await;
-                }
-            }
-
-            None => {
-
-            }
-        }
-
-        "BreakCamera" => match args.next() {
-            Some(data) => {
-                let data_unchecked: Result<datatypes::edge::BreakCamera> = serde_json::from_str(data);
-                if data_unchecked.is_ok()  {
-                    let json = data_unchecked.unwrap();
-                    server.break_camera(conn, json.camera_id).await;
                 }
             }
 
@@ -378,9 +374,9 @@ async fn edge_process(
             None => {}
         }
 
-        "ForgetCamera" => match args.next() {
+        "ForgetCameraRequest" => match args.next() {
             Some(data) => {
-                let data_unchecked: Result<datatypes::shared::ForgetCamera> = serde_json::from_str(data);
+                let data_unchecked: Result<datatypes::shared::ForgetCameraRequest> = serde_json::from_str(data);
                 if data_unchecked.is_ok()  {
                     let json = data_unchecked.unwrap();
                     server.forget_camera(conn, json, WSSide::Edge).await;

@@ -32,6 +32,7 @@ async fn edge_logs(file_manager: web::Data<FileManagerHandle>, json: web::Json<d
 }
 
 #[get("/is_api")]
-async fn is_api() -> impl Responder {
-    HttpResponse::Ok().finish()
+async fn is_api() -> impl Responder
+{
+    HttpResponse::Ok().body("This is an API for the laser intensity analysis project")
 }

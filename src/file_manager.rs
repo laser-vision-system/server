@@ -3,6 +3,7 @@ use std::{ io};
 use std::collections::HashSet;
 use std::fs::File;
 use std::io::{Error, ErrorKind};
+use std::path::Path;
 use actix_web::http::StatusCode;
 use tokio::sync::{mpsc, oneshot};
 use server_edge_datatypes as datatypes;
@@ -106,7 +107,8 @@ impl FileManager {
     }
 
     async fn get_default_config(&mut self) -> SafeHttpResponse {
-        let check_file = File::options().read(true).open("default_config.json");
+        let path = Path::new("./src/content/default_config.json");
+        let check_file = File::options().read(true).open(path);
         if check_file.is_err() {
             return error_response(check_file.err().unwrap());
         }
@@ -133,7 +135,8 @@ impl FileManager {
     }
 
     async fn write_default_config(&mut self, json: String) -> SafeHttpResponse {
-        let check_file = File::options().create(true).write(true).truncate(true).open("default_config.json");
+        let path = Path::new("./src/content/default_config.json");
+        let check_file = File::options().create(true).write(true).truncate(true).open(path);
         if check_file.is_err() {
             return error_response(check_file.err().unwrap());
         }
@@ -150,7 +153,8 @@ impl FileManager {
     }
 
     async fn write_edge_logs(&mut self, logs: HashSet<String>) -> SafeHttpResponse {
-        let check_file = File::options().append(true).create(true).open("edge.log");
+        let path = Path::new("./src/content/edge.log");
+        let check_file = File::options().append(true).create(true).open(path);
         if check_file.is_err() {
             return error_response(check_file.err().unwrap())
         }
