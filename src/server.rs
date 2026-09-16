@@ -220,6 +220,7 @@ impl Server {
         let camera_id = UniqueCameraID { conn: conn_id, camera };
 
         if self.cameras.contains_key(&camera_id) {
+            println!("match!");
             match self.cameras.get(&camera_id).unwrap().state {
                 CameraStatus::Active => {
                     return true;
