@@ -173,8 +173,9 @@ async fn gui_process(
     conn: ConnId
 ) {
     let msg = text.trim();
-
-    println!("Received from GUI: {}", msg);
+    if msg != "Ping"{
+        println!("Received from GUI: {}", msg);
+    }
 
     let mut args = msg.splitn(2, ':');
 
@@ -303,6 +304,18 @@ async fn gui_process(
             server.get_default_thresholds(conn).await;
         }
 
+        "SetEdgeName" => match args.next() {
+            Some(data) => {
+                let data_unchecked: Result<datatypes::gui::SetEdgeName> = serde_json::from_str(data);
+                if data_unchecked.is_ok()  {
+                    let json = data_unchecked.unwrap();
+                    server.set_edge_name(json).await;
+                }
+            }
+
+            None => {}
+        }
+
         _ => {
 
         }
@@ -335,12 +348,12 @@ async fn edge_process(
             }
         }
 
-        "DisconnectCamera" => match args.next() {
+        "UpdateCameraStatus" => match args.next() {
             Some(data) => {
                 let data_unchecked: Result<datatypes::edge::UpdateCameraStatus> = serde_json::from_str(data);
                 if data_unchecked.is_ok()  {
                     let json = data_unchecked.unwrap();
-                    server.unregister_camera(conn, json.camera_id).await;
+                    server.update_camera_status(conn, json).await;
                 }
             }
 

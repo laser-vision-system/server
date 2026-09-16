@@ -34,14 +34,9 @@ enum Command {
         cameras: HashMap<CameraId, datatypes::edge::NewCameraInfo>
     },
 
-    UnregisterCamera {
+    UpdateCameraStatus {
         conn: ConnId,
-        camera: CameraId
-    },
-
-    BreakCamera {
-        conn: ConnId,
-        camera: CameraId
+        data: datatypes::edge::UpdateCameraStatus,
     },
 
     ImageAnalysis {
@@ -114,6 +109,10 @@ enum Command {
 
     ListEdges {
         conn: ConnId,
+    },
+
+    SetEdgeName {
+        data: datatypes::gui::SetEdgeName,
     }
 }
 
@@ -204,7 +203,8 @@ impl Server {
                 }
 
                 for camera in cameras {
-                    self.unregister_camera(camera.0, camera.1).await;
+                    let new_status = datatypes::edge::UpdateCameraStatus {camera_id: camera.1, status: CameraStatus::Disconnected};
+                    self.update_camera_status(camera.0, new_status).await;
                 }
 
             }
@@ -218,13 +218,10 @@ impl Server {
 
     fn is_connected(&self, conn_id: ConnId, camera: CameraId) -> bool {
         let camera_id = UniqueCameraID { conn: conn_id, camera };
-        println!("checking {:?}", camera_id);
 
         if self.cameras.contains_key(&camera_id) {
-            println!("match!");
             match self.cameras.get(&camera_id).unwrap().state {
                 CameraStatus::Active => {
-                    println!("active");
                     return true;
                 },
 
@@ -266,43 +263,30 @@ impl Server {
                 alert_below_threshold,
             };
             self.cameras.insert(UniqueCameraID { conn, camera: camera_id }, camera_details);
-
-            for gui in self.gui_sessions.clone().keys() {
-                self.list_cameras(gui.clone()).await;
-            }
+        }
+        for gui in self.gui_sessions.clone().keys() {
+            self.list_cameras(gui.clone()).await;
         }
     }
 
-    async fn unregister_camera(&mut self, conn: ConnId, camera: CameraId) {
-        let get_details = self.cameras.get(&UniqueCameraID { conn, camera });
+    async fn update_camera_status(&mut self, conn: ConnId, data: datatypes::edge::UpdateCameraStatus) {
+        let get_details = self.cameras.get(&UniqueCameraID { conn, camera: data.camera_id });
         if get_details.is_none() {
             return;
         }
         let details = get_details.unwrap();
         let new_details = CameraDetails {
             name: details.name.clone(),
-            state: CameraStatus::Disconnected,
+            state: data.status.clone(),
             warn_below_threshold: details.warn_below_threshold,
             alert_below_threshold: details.alert_below_threshold
         };
-        self.cameras.insert(UniqueCameraID { conn, camera }, new_details);
-        self.disconnect_camera(conn, camera).await;
-    }
+        self.cameras.insert(UniqueCameraID { conn, camera: data.camera_id }, new_details);
+        match data.status {
+            CameraStatus::Active => {}
 
-    async fn break_camera(&mut self, conn: ConnId, camera: CameraId) {
-        let get_details = self.cameras.get(&UniqueCameraID { conn, camera });
-        if get_details.is_none() {
-            return;
+            _ => self.disconnect_camera(conn, data.camera_id).await
         }
-        let details = get_details.unwrap();
-        let new_details = CameraDetails {
-            name: details.name.clone(),
-            state: CameraStatus::Broken,
-            warn_below_threshold: details.warn_below_threshold,
-            alert_below_threshold: details.alert_below_threshold
-        };
-        self.cameras.insert(UniqueCameraID { conn, camera }, new_details);
-        self.disconnect_camera(conn, camera).await;
     }
 
     async fn disconnect_camera(&mut self, conn: ConnId, camera: CameraId) {
@@ -412,11 +396,9 @@ impl Server {
     }
 
     async fn start_viewing_camera(&mut self, gui_conn: ConnId, edge_conn: ConnId, camera: CameraId) {
-        println!("Starting viewing camera");
         if !self.is_connected(edge_conn, camera) {
             return;
         }
-        println!("Starting viewing camera 2");
         if self.video_routes.contains_key(&gui_conn) {
             if self.video_routes[&gui_conn] == (edge_conn, camera) {
                 return;
@@ -424,7 +406,6 @@ impl Server {
             self.stop_viewing_camera(gui_conn).await;
         }
 
-        println!("Starting viewing camera 3");
 
         let mut skip_camera_startup = false;
 
@@ -438,7 +419,6 @@ impl Server {
             return;
         }
 
-        println!("Starting viewing camera 4");
 
         let edge_struct = datatypes::edge::StartViewingCamera {
             camera_id: camera,
@@ -654,7 +634,7 @@ impl Server {
         };
         msg.push_str(&*serde_json::to_string(&send).unwrap());
 
-        let target = self.gui_sessions.get(&conn_id);
+        let target = self.edge_sessions.get(&data.edge_id);
 
         if let Some(target) = target {
             target.send(msg.clone()).unwrap();
@@ -675,7 +655,7 @@ impl Server {
         }
     }
 
-    pub async fn list_edges(&mut self, conn_id: ConnId) {
+    async fn list_edges(&mut self, conn_id: ConnId) {
         let mut msg = "ListOfEdges:".to_string();
         let mut edge_names_copy = HashMap::new();
 
@@ -691,7 +671,12 @@ impl Server {
         if let Some(target) = target {
             target.send(msg.clone()).unwrap();
         }
+    }
 
+    async fn set_edge_name(&mut self, data: datatypes::gui::SetEdgeName) {
+        if self.edge_names.contains_key(&data.edge_id) {
+            self.edge_names.insert(data.edge_id, data.name);
+        }
     }
 
     pub async fn run(mut self) -> io::Result<()> {
@@ -710,12 +695,8 @@ impl Server {
                     self.register_cameras(conn, cameras).await;
                 }
 
-                Command::UnregisterCamera { conn, camera } => {
-                    self.unregister_camera(conn, camera).await;
-                }
-
-                Command::BreakCamera { conn, camera} => {
-                    self.break_camera(conn,camera).await;
+                Command::UpdateCameraStatus { conn, data } => {
+                    self.update_camera_status(conn, data).await;
                 }
 
                 Command::ImageAnalysis { conn, analysis } => {
@@ -778,6 +759,10 @@ impl Server {
                 Command::ListEdges {conn } => {
                     self.list_edges(conn).await;
                 }
+
+                Command::SetEdgeName {data} => {
+                    self.set_edge_name(data).await;
+                }
             }
         }
         Ok(())
@@ -808,12 +793,8 @@ impl ServerHandle {
         self.cmd_tx.send(Command::RegisterCameras {conn,cameras}).unwrap();
     }
 
-    pub async fn unregister_camera(&self, conn: ConnId, camera: CameraId) {
-        self.cmd_tx.send(Command::UnregisterCamera {conn,camera}).unwrap();
-    }
-
-    pub async fn break_camera(&self, conn: ConnId, camera: CameraId) {
-        self.cmd_tx.send(Command::BreakCamera {conn,camera}).unwrap();
+    pub async fn update_camera_status(&self, conn: ConnId, data: datatypes::edge::UpdateCameraStatus) {
+        self.cmd_tx.send(Command::UpdateCameraStatus {conn, data}).unwrap();
     }
 
     pub async fn image_analysis(&self, conn: ConnId, analysis: datatypes::edge::ImageAnalysis) {
@@ -882,5 +863,9 @@ impl ServerHandle {
 
     pub async fn list_edges(&self, conn: ConnId) {
         self.cmd_tx.send(Command::ListEdges{conn}).unwrap();
+    }
+
+    pub async fn set_edge_name(&self, data: datatypes::gui::SetEdgeName) {
+        self.cmd_tx.send(Command::SetEdgeName{data}).unwrap();
     }
 }
