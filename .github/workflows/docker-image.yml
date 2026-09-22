@@ -16,6 +16,10 @@ jobs:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - uses: actions/checkout@v4.2.2
+      - name: github authentication
+        run: gh auth login -p GH_TOKEN
+
+      - uses: actions/checkout@v4.2.2
       - name: Setup submodule
         run: git submodule update --init --recursive
 
