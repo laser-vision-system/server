@@ -13,9 +13,12 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+
       - uses: actions/checkout@v4.2.2
       - name: Setup submodule
         run: git submodule update --init --recursive
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - uses: actions/checkout@v4
       - name: Build the Docker image
