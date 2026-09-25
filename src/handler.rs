@@ -108,7 +108,6 @@ pub async fn ws_handler(
 			}
 
 			Some(img_data) = img_rx.recv() => {
-				println!("Routing image to: {conn_id:?}");
 				session.binary(img_data).await.unwrap();
 			}
 
@@ -351,6 +350,17 @@ async fn edge_process(server: &ServerHandle, text: &str, conn: ConnId) {
   					server.forget_camera(conn, json, WSSide::Edge).await;
   				}
   			},
+
+		"Alert" => match args.next() {
+			Some(data) => {
+				let data_unchecked: Result<datatypes::edge::Alert> = serde_json::from_str(data);
+				if data_unchecked.is_ok() {
+					let json = data_unchecked.unwrap();
+					server.alert_from_edge(conn, json).await;
+				}
+			},
+			None => {},
+		},
 
 		_ => {},
 	}

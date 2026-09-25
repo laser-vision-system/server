@@ -114,6 +114,16 @@ enum Command {
 	SetEdgeName {
 		data: datatypes::gui::SetEdgeName,
 	},
+
+	AlertFromEdge {
+		conn: ConnId,
+		data: datatypes::edge::Alert,
+	},
+
+	AlertFromServer {
+		target: Option<ConnId>,
+		data: datatypes::edge::Alert,
+	},
 }
 
 #[derive(Hash, Debug, Clone, Copy, Eq, PartialEq)]
@@ -770,6 +780,35 @@ impl Server {
 		}
 	}
 
+	async fn send_alert(
+		&mut self,
+		conn_id: Option<ConnId>,
+		alert: datatypes::edge::Alert,
+		target: Option<ConnId>,
+	) {
+		let mut msg = "Alert:".to_string();
+		let send = datatypes::gui::Alert {
+			conn_id,
+			camera_id: alert.camera_id,
+			alert_code: alert.alert_code,
+			alert_type: alert.alert_type,
+			alert_description: alert.alert_description,
+		};
+		msg.push_str(&*serde_json::to_string(&send).unwrap());
+
+		if let Some(target) = target {
+			self.gui_sessions
+				.get(&target)
+				.unwrap()
+				.send(msg.clone())
+				.unwrap();
+		} else {
+			for gui in self.gui_sessions.clone() {
+				gui.1.clone().send(msg.clone()).unwrap();
+			}
+		}
+	}
+
 	pub async fn run(mut self) -> io::Result<()> {
 		while let Some(cmd) = self.cmd_rx.recv().await {
 			match cmd {
@@ -837,7 +876,6 @@ impl Server {
 				},
 
 				Command::RouteImage { conn, bytes } => {
-					println!("Routing image from: {conn:?}");
 					self.route_image(conn, bytes).await;
 				},
 
@@ -863,6 +901,14 @@ impl Server {
 
 				Command::SetEdgeName { data } => {
 					self.set_edge_name(data).await;
+				},
+
+				Command::AlertFromEdge { conn, data } => {
+					self.send_alert(Some(conn), data, None).await;
+				},
+
+				Command::AlertFromServer { data, target } => {
+					self.send_alert(None, data, target).await;
 				},
 			}
 		}
@@ -1056,5 +1102,17 @@ impl ServerHandle {
 
 	pub async fn set_edge_name(&self, data: datatypes::gui::SetEdgeName) {
 		self.cmd_tx.send(Command::SetEdgeName { data }).unwrap();
+	}
+
+	pub async fn alert_from_edge(&self, conn: ConnId, data: datatypes::edge::Alert) {
+		self.cmd_tx
+			.send(Command::AlertFromEdge { conn, data })
+			.unwrap();
+	}
+
+	pub async fn alert_from_server(&self, data: datatypes::edge::Alert, target: Option<ConnId>) {
+		self.cmd_tx
+			.send(Command::AlertFromServer { data, target })
+			.unwrap();
 	}
 }
