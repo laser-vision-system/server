@@ -777,11 +777,9 @@ impl Server {
 	}
 
 	async fn set_edge_name(&mut self, data: datatypes::gui::SetEdgeName) {
-		if let std::collections::hash_map::Entry::Occupied(mut e) =
-			self.edge_names.entry(data.edge_id)
-		{
-			e.insert(data.name);
-		}
+		self.edge_names
+			.entry(data.edge_id)
+			.and_modify(|entry| *entry = data.name);
 	}
 
 	async fn send_alert(

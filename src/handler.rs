@@ -172,79 +172,82 @@ async fn process_ws(
 
 async fn gui_process(server: &ServerHandle, text: &str, conn: ConnId) {
 	let msg = text.trim();
-	if msg != "Ping" {
-		println!("Received from GUI: {msg}");
-	} else {
+	if msg == "Ping" {
 		return;
 	}
+
+	println!("Received from GUI: {msg}");
 
 	let data_unchecked: Result<datatypes::gui::ServerRequests> =
 		serde_json::from_str(msg);
 
-	match data_unchecked {
-		Ok(data) => match data {
-			ServerRequests::ListEdges => server.list_edges(conn).await,
+	let Ok(data) = data_unchecked else {
+		eprintln!("Message could not deserialized due to: {:?}", data_unchecked.err().unwrap().to_string());
+		return;
+	};
 
-			ServerRequests::ListCameras => server.list_cameras(conn).await,
+	match data {
+		ServerRequests::ListEdges => server.list_edges(conn).await,
 
-			ServerRequests::ViewCameraConfig(data) => {
-				server.view_camera_config(conn, data).await
-			},
+		ServerRequests::ListCameras => server.list_cameras(conn).await,
 
-			ServerRequests::Configuration(data) => {
-				server.configuration(conn, data, WSSide::GUI).await
-			},
-
-			ServerRequests::SetEdgeName(data) => {
-				server.set_edge_name(data).await
-			},
-
-			ServerRequests::SetEdgeProcessingType(data) => {
-				server.set_edge_processing_type(data).await
-			},
-
-			ServerRequests::SetCameraThresholds(data) => {
-				server.set_camera_thresholds(data).await
-			},
-
-			ServerRequests::SetDefaultThreshold(data) => {
-				server.set_default_thresholds(data).await
-			},
-
-			ServerRequests::GetDefaultThresholds => {
-				server.get_default_thresholds(conn).await
-			},
-
-			ServerRequests::SetNameCamera(data) => {
-				server.set_name_camera(data).await
-			},
-
-			ServerRequests::StartViewingCamera(data) => {
-				server.start_viewing_camera(conn, data).await
-			},
-
-			ServerRequests::StopViewingCamera => {
-				server.stop_viewing_camera(conn).await
-			},
-
-			ServerRequests::Setpoint(data) => server.setpoint(Some(data)).await,
-
-			ServerRequests::ForgetCameraRequest(data) => {
-				server.forget_camera(conn, data, WSSide::GUI).await
-			},
-
-			ServerRequests::ForceRetryCamera(data) => {
-				server.force_retry_camera(data).await
-			},
-
-			ServerRequests::ListProcessingTypes => {
-				server.list_processing_types(conn).await
-			},
-
-			_ => {},
+		ServerRequests::ViewCameraConfig(data) => {
+			server.view_camera_config(conn, data).await
 		},
 
-		Err(_) => {},
+		ServerRequests::Configuration(data) => {
+			server.configuration(conn, data, WSSide::GUI).await
+		},
+
+		ServerRequests::SetEdgeName(data) => {
+			server.set_edge_name(data).await
+		},
+
+		ServerRequests::SetEdgeProcessingType(data) => {
+			server.set_edge_processing_type(data).await
+		},
+
+		ServerRequests::SetCameraThresholds(data) => {
+			server.set_camera_thresholds(data).await
+		},
+
+		ServerRequests::SetDefaultThreshold(data) => {
+			server.set_default_thresholds(data).await
+		},
+
+		ServerRequests::GetDefaultThresholds => {
+			server.get_default_thresholds(conn).await
+		},
+
+		ServerRequests::SetNameCamera(data) => {
+			server.set_name_camera(data).await
+		},
+
+		ServerRequests::StartViewingCamera(data) => {
+			server.start_viewing_camera(conn, data).await
+		},
+
+		ServerRequests::StopViewingCamera => {
+			server.stop_viewing_camera(conn).await
+		},
+
+		ServerRequests::Setpoint(data) => server.setpoint(Some(data)).await,
+
+		ServerRequests::ForgetCameraRequest(data) => {
+			server.forget_camera(conn, data, WSSide::GUI).await
+		},
+
+		ServerRequests::ForceRetryCamera(data) => {
+			server.force_retry_camera(data).await
+		},
+
+		ServerRequests::ListProcessingTypes => {
+			server.list_processing_types(conn).await
+		},
+
+		_ => {
+			eprintln!("Message not recognised");
+		},
 	}
 }
 
@@ -256,37 +259,41 @@ async fn edge_process(server: &ServerHandle, text: &str, conn: ConnId) {
 	let data_unchecked: Result<datatypes::edge::ServerRequests> =
 		serde_json::from_str(msg);
 
-	match data_unchecked {
-		Ok(data) => match data {
-			datatypes::edge::ServerRequests::InitialiseConnection(data) => {}, //TODO: not yet implemented
+	let Ok(data) = data_unchecked else {
+		eprintln!("Message could not deserialized due to: {:?}", data_unchecked.err().unwrap().to_string());
+		return;
+	};
 
-			datatypes::edge::ServerRequests::RegisterCameras(data) => {
-				server.register_cameras(conn, data.cameras).await
-			},
+	match data {
+		datatypes::edge::ServerRequests::InitialiseConnection(data) => {}, //TODO: not yet implemented
 
-			datatypes::edge::ServerRequests::UpdateCameraStatus(data) => {
-				server.update_camera_status(conn, data).await
-			},
-
-			datatypes::edge::ServerRequests::ImageAnalysis(data) => {
-				server.image_analysis(conn, data).await
-			},
-
-			datatypes::edge::ServerRequests::Configuration(data) => {
-				server.configuration(conn, data, WSSide::Edge).await
-			},
-
-			datatypes::edge::ServerRequests::ForgetCameraRequest(data) => {
-				server.forget_camera(conn, data, WSSide::Edge).await
-			},
-
-			datatypes::edge::ServerRequests::Alert(data) => {
-				server.alert_from_edge(conn, data).await
-			},
-
-			_ => {},
+		datatypes::edge::ServerRequests::RegisterCameras(data) => {
+			server.register_cameras(conn, data.cameras).await
 		},
 
-		Err(_) => {},
+		datatypes::edge::ServerRequests::UpdateCameraStatus(data) => {
+			server.update_camera_status(conn, data).await
+		},
+
+		datatypes::edge::ServerRequests::ImageAnalysis(data) => {
+			server.image_analysis(conn, data).await
+		},
+
+		datatypes::edge::ServerRequests::Configuration(data) => {
+			server.configuration(conn, data, WSSide::Edge).await
+		},
+
+		datatypes::edge::ServerRequests::ForgetCameraRequest(data) => {
+			server.forget_camera(conn, data, WSSide::Edge).await
+		},
+
+		datatypes::edge::ServerRequests::Alert(data) => {
+			server.alert_from_edge(conn, data).await
+		},
+
+		_ => {
+			eprintln!("Message not recognised");
+		},
 	}
+
 }
