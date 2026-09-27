@@ -293,6 +293,15 @@ async fn gui_process(server: &ServerHandle, text: &str, conn: ConnId) {
   				}
   			},
 
+		"ForceRetryCamera" => if let Some(data) = args.next() {
+			let data_unchecked: Result<datatypes::gui::ForceRetryCamera> =
+				serde_json::from_str(data);
+			if data_unchecked.is_ok() {
+				let json = data_unchecked.unwrap();
+				server.force_retry_camera(json).await;
+			}
+		}
+
 		_ => {},
 	}
 }
@@ -351,15 +360,14 @@ async fn edge_process(server: &ServerHandle, text: &str, conn: ConnId) {
   				}
   			},
 
-		"Alert" => match args.next() {
-			Some(data) => {
-				let data_unchecked: Result<datatypes::edge::Alert> = serde_json::from_str(data);
-				if data_unchecked.is_ok() {
-					let json = data_unchecked.unwrap();
-					server.alert_from_edge(conn, json).await;
-				}
-			},
-			None => {},
+		"Alert" => if let Some(data) = args.next() {
+			let data_unchecked: Result<datatypes::edge::Alert>
+				= serde_json::from_str(data);
+			if data_unchecked.is_ok() {
+				let json = data_unchecked.unwrap();
+				server.alert_from_edge(conn, json).await;
+			}
+
 		},
 
 		_ => {},

@@ -124,6 +124,10 @@ enum Command {
 		target: Option<ConnId>,
 		data: datatypes::edge::Alert,
 	},
+
+	ForceRetryCamera {
+		data: datatypes::gui::ForceRetryCamera,
+	}
 }
 
 #[derive(Hash, Debug, Clone, Copy, Eq, PartialEq)]
@@ -809,6 +813,18 @@ impl Server {
 		}
 	}
 
+	async fn force_retry_camera(&mut self, data: datatypes::gui::ForceRetryCamera) {
+		let mut msg = "ForceRetryCamera:".to_owned();
+		let send = datatypes::edge::ForceRetryCamera {
+			camera_id: data.camera_id,
+		};
+		msg.push_str(&serde_json::to_string(&send).unwrap());
+		let target = self.gui_sessions.get(&data.camera_id);
+		if let Some(target) = target {
+			target.send(msg.clone()).unwrap();
+		}
+	}
+
 	pub async fn run(mut self) -> io::Result<()> {
 		while let Some(cmd) = self.cmd_rx.recv().await {
 			match cmd {
@@ -910,6 +926,10 @@ impl Server {
 				Command::AlertFromServer { data, target } => {
 					self.send_alert(None, data, target).await;
 				},
+				
+				Command::ForceRetryCamera {data} => {
+					self.force_retry_camera(data).await;
+				}
 			}
 		}
 		Ok(())
@@ -1113,6 +1133,12 @@ impl ServerHandle {
 	pub async fn alert_from_server(&self, data: datatypes::edge::Alert, target: Option<ConnId>) {
 		self.cmd_tx
 			.send(Command::AlertFromServer { data, target })
+			.unwrap();
+	}
+
+	pub async fn force_retry_camera(&self, data: datatypes::gui::ForceRetryCamera) {
+		self.cmd_tx
+			.send(Command::ForceRetryCamera { data })
 			.unwrap();
 	}
 }
