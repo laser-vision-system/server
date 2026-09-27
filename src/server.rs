@@ -127,6 +127,10 @@ enum Command {
 
 	ForceRetryCamera {
 		data: datatypes::gui::ForceRetryCamera,
+	},
+
+	ListProcessingTypes {
+		conn: ConnId,
 	}
 }
 
@@ -825,6 +829,16 @@ impl Server {
 		}
 	}
 
+	async fn list_processing_types(&mut self, conn_id: ConnId) {
+		let mut msg = "list_processing_types:".to_owned();
+		let send = datatypes::gui::ProcessingTypes::default();
+		msg.push_str(&serde_json::to_string(&send).unwrap());
+		let target = self.gui_sessions.get(&conn_id);
+		if let Some(target) = target {
+			target.send(msg.clone()).unwrap();
+		}
+	}
+
 	pub async fn run(mut self) -> io::Result<()> {
 		while let Some(cmd) = self.cmd_rx.recv().await {
 			match cmd {
@@ -926,9 +940,13 @@ impl Server {
 				Command::AlertFromServer { data, target } => {
 					self.send_alert(None, data, target).await;
 				},
-				
+
 				Command::ForceRetryCamera {data} => {
 					self.force_retry_camera(data).await;
+				}
+
+				Command::ListProcessingTypes { conn } => {
+					self.list_processing_types(conn).await;
 				}
 			}
 		}
@@ -1139,6 +1157,12 @@ impl ServerHandle {
 	pub async fn force_retry_camera(&self, data: datatypes::gui::ForceRetryCamera) {
 		self.cmd_tx
 			.send(Command::ForceRetryCamera { data })
+			.unwrap();
+	}
+
+	pub async fn list_processing_types(&self, conn: ConnId) {
+		self.cmd_tx
+			.send(Command::ListProcessingTypes { conn })
 			.unwrap();
 	}
 }

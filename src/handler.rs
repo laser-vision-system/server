@@ -302,6 +302,10 @@ async fn gui_process(server: &ServerHandle, text: &str, conn: ConnId) {
 			}
 		}
 
+		"list_processing_types" => {
+			server.list_processing_types(conn).await;
+		}
+
 		_ => {},
 	}
 }
