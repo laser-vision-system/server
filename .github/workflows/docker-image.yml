@@ -1,29 +1,80 @@
-name: Docker Image CI
+name: Docker Image Builder
+
+run-name: ${{ github.actor }} is building and pushing a docker image for ${{ github.repository }}
 
 on:
-  push:
-    branches: [ "main" ]
-  pull_request:
-    branches: [ "main" ]
+  workflow_dispatch:
 
+  push:
+    branches:
+      - 'main'
+      - 'dev'
+      - 'feat/docker-automated-workflow'
+    paths:
+      - '**.rs'
+      - 'Cargo.lock'
+      - 'Dockerfile'
+      - 'docker-image.yml'
+      - ...
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  # Only if we want a new push to replace an existing build-in-progress.
+  cancel-in-progress: true
 
 jobs:
+  docker_build:
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: write
+      packages: write
 
-  build:
-
-    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-22.04-arm
+            arch: arm64
+          - os: ubuntu-22.04
+            arch: amd64
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
         with:
-           submodules: true
-           token: ${{ secrets.DOCKER_GH_AUTO_AUTH_KEY }}
+          submodules: recursive
+          token: ${{ secrets.DOCKER_GH_AUTO_AUTH_KEY }}
 
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-${{ matrix.arch }}
+          tags: |
+            type=ref,event=branch
+            type=raw,value=stable,enable={{is_default_branch}}
+            type=schedule,pattern={{date 'YYYY-MM-DD'}}
 
       - uses: actions/checkout@v4.2.2
-      - name: Setup submodule
-        run: git submodule update --init --recursive
+      - name: configure docker builder
+        run: docker buildx create --name container-builder --driver docker-container --bootstrap --use
 
-      - uses: actions/checkout@v4
-      - name: Build the Docker image
-        run: docker build . --file Dockerfile --tag stable:$(date +%s)
+      - name: Login to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v4
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          builder: container-builder
+          platforms: linux/${{ matrix.arch }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
