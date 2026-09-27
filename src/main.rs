@@ -5,10 +5,7 @@ mod server;
 
 use std::io;
 
-use actix_web::{
-	App, Error, HttpRequest, HttpResponse, HttpServer,
-	web,
-};
+use actix_web::{App, Error, HttpRequest, HttpResponse, HttpServer, web};
 use tokio::{
 	task::{spawn, spawn_local},
 	try_join,
