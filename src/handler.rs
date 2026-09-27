@@ -3,8 +3,10 @@ use std::time::{Duration, Instant};
 use actix_ws::{AggregatedMessage, CloseReason};
 use datatypes::shared::ConnId;
 use futures_util::StreamExt as _;
+use serde::Serialize;
 use serde_json::Result;
 use server_edge_datatypes as datatypes;
+use server_edge_datatypes::gui::ServerRequests;
 use tokio::{sync::mpsc, time::interval};
 
 use crate::{ServerHandle, WSSide};
@@ -172,141 +174,77 @@ async fn gui_process(server: &ServerHandle, text: &str, conn: ConnId) {
 	let msg = text.trim();
 	if msg != "Ping" {
 		println!("Received from GUI: {msg}");
+	} else {
+		return;
 	}
 
-	let mut args = msg.splitn(2, ':');
+	let data_unchecked: Result<datatypes::gui::ServerRequests> =
+		serde_json::from_str(msg);
 
-	match args.next().unwrap() {
-		"ListCameras" => {
-			server.list_cameras(conn).await;
-		},
+	match data_unchecked {
+		Ok(data) => match data {
+			ServerRequests::ListEdges => server.list_edges(conn).await,
 
-		"ListEdges" => {
-			server.list_edges(conn).await;
-		},
-		"SetNameCamera" => if let Some(data) = args.next() {
-  				let data_unchecked: Result<datatypes::gui::SetNameCamera> =
-  					serde_json::from_str(data);
-  				if data_unchecked.is_ok() {
-  					let json = data_unchecked.unwrap();
-  					server.set_name_camera(json).await;
-  				}
-  			},
+			ServerRequests::ListCameras => server.list_cameras(conn).await,
 
-		"StartViewingCamera" => if let Some(data) = args.next() {
-  				let data_unchecked: Result<datatypes::gui::StartViewingCamera> =
-  					serde_json::from_str(data);
-  				if data_unchecked.is_ok() {
-  					let json = data_unchecked.unwrap();
-  					server.start_viewing_camera(conn, json).await;
-  				}
-  			},
-
-		"StopViewingCamera" => {
-			server.stop_viewing_camera(conn).await;
-		},
-
-		"Setpoint" => match args.next() {
-			Some(data) => {
-				let data_unchecked: Result<datatypes::gui::Setpoint> =
-					serde_json::from_str(data);
-				if data_unchecked.is_ok() {
-					let json = data_unchecked.unwrap();
-					server.setpoint(Some(json)).await;
-				}
+			ServerRequests::ViewCameraConfig(data) => {
+				server.view_camera_config(conn, data).await
 			},
 
-			None => {
-				server.setpoint(None).await;
+			ServerRequests::Configuration(data) => {
+				server.configuration(conn, data, WSSide::GUI).await
 			},
+
+			ServerRequests::SetEdgeName(data) => {
+				server.set_edge_name(data).await
+			},
+
+			ServerRequests::SetEdgeProcessingType(data) => {
+				server.set_edge_processing_type(data).await
+			},
+
+			ServerRequests::SetCameraThresholds(data) => {
+				server.set_camera_thresholds(data).await
+			},
+
+			ServerRequests::SetDefaultThreshold(data) => {
+				server.set_default_thresholds(data).await
+			},
+
+			ServerRequests::GetDefaultThresholds => {
+				server.get_default_thresholds(conn).await
+			},
+
+			ServerRequests::SetNameCamera(data) => {
+				server.set_name_camera(data).await
+			},
+
+			ServerRequests::StartViewingCamera(data) => {
+				server.start_viewing_camera(conn, data).await
+			},
+
+			ServerRequests::StopViewingCamera => {
+				server.stop_viewing_camera(conn).await
+			},
+
+			ServerRequests::Setpoint(data) => server.setpoint(Some(data)).await,
+
+			ServerRequests::ForgetCameraRequest(data) => {
+				server.forget_camera(conn, data, WSSide::GUI).await
+			},
+
+			ServerRequests::ForceRetryCamera(data) => {
+				server.force_retry_camera(data).await
+			},
+
+			ServerRequests::ListProcessingTypes => {
+				server.list_processing_types(conn).await
+			},
+
+			_ => {},
 		},
 
-		"ViewCameraConfig" => if let Some(data) = args.next() {
-  				let data_unchecked: Result<
-  					datatypes::shared::ViewCameraConfig,
-  				> = serde_json::from_str(data);
-  				if data_unchecked.is_ok() {
-  					let json = data_unchecked.unwrap();
-  					server.view_camera_config(conn, json).await;
-  				}
-  			},
-
-		"Configuration" => if let Some(data) = args.next() {
-  				let data_unchecked: Result<datatypes::shared::Configuration> =
-  					serde_json::from_str(data);
-  				if data_unchecked.is_ok() {
-  					let json = data_unchecked.unwrap();
-  					server.configuration(conn, json, WSSide::GUI).await;
-  				}
-  			},
-
-		"ForgetCameraRequest" => if let Some(data) = args.next() {
-  				let data_unchecked: Result<
-  					datatypes::shared::ForgetCameraRequest,
-  				> = serde_json::from_str(data);
-  				if data_unchecked.is_ok() {
-  					let json = data_unchecked.unwrap();
-  					server.forget_camera(conn, json, WSSide::GUI).await;
-  				}
-  			},
-
-		"SetCameraThresholds" => if let Some(data) = args.next() {
-  				let data_unchecked: Result<
-  					datatypes::gui::SetCameraThresholds,
-  				> = serde_json::from_str(data);
-  				if data_unchecked.is_ok() {
-  					let json = data_unchecked.unwrap();
-  					server.set_camera_thresholds(json).await;
-  				}
-  			},
-
-		"SetDefaultThreshold" => if let Some(data) = args.next() {
-  				let data_unchecked: Result<
-  					datatypes::gui::SetDefaultThreshold,
-  				> = serde_json::from_str(data);
-  				if data_unchecked.is_ok() {
-  					let json = data_unchecked.unwrap();
-  					server.set_default_thresholds(json).await;
-  				}
-  			},
-
-		"SetEdgeProcessingType" => if let Some(data) = args.next() {
-  				let data_unchecked: Result<
-  					datatypes::gui::SetEdgeProcessingType,
-  				> = serde_json::from_str(data);
-  				if data_unchecked.is_ok() {
-  					let json = data_unchecked.unwrap();
-  					server.set_edge_processing_type(conn, json).await;
-  				}
-  			},
-
-		"GetDefaultThresholds" => {
-			server.get_default_thresholds(conn).await;
-		},
-
-		"SetEdgeName" => if let Some(data) = args.next() {
-  				let data_unchecked: Result<datatypes::gui::SetEdgeName> =
-  					serde_json::from_str(data);
-  				if data_unchecked.is_ok() {
-  					let json = data_unchecked.unwrap();
-  					server.set_edge_name(json).await;
-  				}
-  			},
-
-		"ForceRetryCamera" => if let Some(data) = args.next() {
-			let data_unchecked: Result<datatypes::gui::ForceRetryCamera> =
-				serde_json::from_str(data);
-			if data_unchecked.is_ok() {
-				let json = data_unchecked.unwrap();
-				server.force_retry_camera(json).await;
-			}
-		}
-
-		"list_processing_types" => {
-			server.list_processing_types(conn).await;
-		}
-
-		_ => {},
+		Err(_) => {},
 	}
 }
 
@@ -315,65 +253,40 @@ async fn edge_process(server: &ServerHandle, text: &str, conn: ConnId) {
 
 	println!("Received from Edge: {msg}");
 
-	let mut args = msg.splitn(2, ':');
-	match args.next().unwrap() {
-		"RegisterCameras" => if let Some(data) = args.next() {
-  				let data_unchecked: Result<datatypes::edge::RegisterCameras> =
-  					serde_json::from_str(data);
-  				if data_unchecked.is_ok() {
-  					let json = data_unchecked.unwrap();
-  					server.register_cameras(conn, json.cameras).await;
-  				}
-  			},
+	let data_unchecked: Result<datatypes::edge::ServerRequests> =
+		serde_json::from_str(msg);
 
-		"UpdateCameraStatus" => if let Some(data) = args.next() {
-  				let data_unchecked: Result<
-  					datatypes::edge::UpdateCameraStatus,
-  				> = serde_json::from_str(data);
-  				if data_unchecked.is_ok() {
-  					let json = data_unchecked.unwrap();
-  					server.update_camera_status(conn, json).await;
-  				}
-  			},
+	match data_unchecked {
+		Ok(data) => match data {
+			datatypes::edge::ServerRequests::InitialiseConnection(data) => {}, //TODO: not yet implemented
 
-		"ImageAnalysis" => if let Some(data) = args.next() {
-  				let data_unchecked: Result<datatypes::edge::ImageAnalysis> =
-  					serde_json::from_str(data);
-  				if data_unchecked.is_ok() {
-  					let json = data_unchecked.unwrap();
-  					server.image_analysis(conn, json).await;
-  				}
-  			},
+			datatypes::edge::ServerRequests::RegisterCameras(data) => {
+				server.register_cameras(conn, data.cameras).await
+			},
 
-		"Configuration" => if let Some(data) = args.next() {
-  				let data_unchecked: Result<datatypes::shared::Configuration> =
-  					serde_json::from_str(data);
-  				if data_unchecked.is_ok() {
-  					let json = data_unchecked.unwrap();
-  					server.configuration(conn, json, WSSide::Edge).await;
-  				}
-  			},
+			datatypes::edge::ServerRequests::UpdateCameraStatus(data) => {
+				server.update_camera_status(conn, data).await
+			},
 
-		"ForgetCameraRequest" => if let Some(data) = args.next() {
-  				let data_unchecked: Result<
-  					datatypes::shared::ForgetCameraRequest,
-  				> = serde_json::from_str(data);
-  				if data_unchecked.is_ok() {
-  					let json = data_unchecked.unwrap();
-  					server.forget_camera(conn, json, WSSide::Edge).await;
-  				}
-  			},
+			datatypes::edge::ServerRequests::ImageAnalysis(data) => {
+				server.image_analysis(conn, data).await
+			},
 
-		"Alert" => if let Some(data) = args.next() {
-			let data_unchecked: Result<datatypes::edge::Alert>
-				= serde_json::from_str(data);
-			if data_unchecked.is_ok() {
-				let json = data_unchecked.unwrap();
-				server.alert_from_edge(conn, json).await;
-			}
+			datatypes::edge::ServerRequests::Configuration(data) => {
+				server.configuration(conn, data, WSSide::Edge).await
+			},
 
+			datatypes::edge::ServerRequests::ForgetCameraRequest(data) => {
+				server.forget_camera(conn, data, WSSide::Edge).await
+			},
+
+			datatypes::edge::ServerRequests::Alert(data) => {
+				server.alert_from_edge(conn, data).await
+			},
+
+			_ => {},
 		},
 
-		_ => {},
+		Err(_) => {},
 	}
 }

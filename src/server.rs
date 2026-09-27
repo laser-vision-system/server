@@ -10,9 +10,12 @@ use datatypes::{
 };
 use rand::{self, RngExt as _};
 use server_edge_datatypes as datatypes;
+use server_edge_datatypes::edge::EdgeRequests;
+use server_edge_datatypes::gui::GUIRequests;
 use server_edge_datatypes::shared::{CameraStatus, Deviation};
 use tokio::sync::{mpsc, mpsc::UnboundedSender, oneshot};
 
+use crate::WSSide::Edge;
 use crate::{Msg, WSSide};
 
 #[derive(Debug)]
@@ -99,7 +102,6 @@ enum Command {
 	},
 
 	SetEdgeProcessingType {
-		conn: ConnId,
 		data: datatypes::gui::SetEdgeProcessingType,
 	},
 
@@ -131,7 +133,7 @@ enum Command {
 
 	ListProcessingTypes {
 		conn: ConnId,
-	}
+	},
 }
 
 #[derive(Hash, Debug, Clone, Copy, Eq, PartialEq)]
@@ -201,10 +203,8 @@ impl Server {
 			},
 			WSSide::Edge => {
 				self.edge_sessions.insert(id, tx);
-				self.edge_names.insert(
-					id,
-					format!("Edge {}", self.edge_names.len()),
-				);
+				self.edge_names
+					.insert(id, format!("Edge {}", self.edge_names.len()));
 				for gui in self.gui_sessions.clone().keys() {
 					self.list_edges(*gui).await;
 				}
@@ -224,8 +224,7 @@ impl Server {
 				for camera in self.cameras.keys() {
 					if camera.conn == conn_id {
 						println!("disconnecting camera {}", camera.camera);
-						cameras
-							.insert(<(ConnId, CameraId)>::from(*camera));
+						cameras.insert(<(ConnId, CameraId)>::from(*camera));
 					}
 				}
 
@@ -289,11 +288,10 @@ impl Server {
 				conn,
 				camera: camera_id,
 			}) {
-				let old_details = &self
-					.cameras[&UniqueCameraID {
-						conn,
-						camera: camera_id,
-					}];
+				let old_details = &self.cameras[&UniqueCameraID {
+					conn,
+					camera: camera_id,
+				}];
 				warn_below_threshold = old_details.warn_below_threshold;
 				alert_below_threshold = old_details.alert_below_threshold;
 			}
@@ -380,12 +378,10 @@ impl Server {
 			camera_id: analysis.camera_id,
 			deviation: analysis.deviation,
 		};
-		let mut msg = "ImageAnalysis:".to_owned();
-		let json = serde_json::to_string(&gui_struct).unwrap();
-		msg.push_str(&json);
-
+		let msg = GUIRequests::ImageAnalysis(gui_struct);
+		let send = serde_json::to_string(&msg).unwrap();
 		for gui in self.gui_sessions.values() {
-			gui.send(msg.clone()).unwrap();
+			gui.send(send.clone()).unwrap();
 		}
 	}
 
@@ -409,13 +405,10 @@ impl Server {
 
 	async fn send_set_point(&mut self, conn: ConnId, camera: CameraId) {
 		let edge_struct = datatypes::edge::Setpoint { camera_id: camera };
-
-		let mut msg = "Setpoint:".to_owned();
-		let json = serde_json::to_string(&edge_struct).unwrap();
-		msg.push_str(&json);
-
+		let msg = EdgeRequests::Setpoint(edge_struct);
+		let send = serde_json::to_string(&msg).unwrap();
 		let target = &self.edge_sessions[&conn];
-		target.send(msg.clone()).unwrap();
+		target.send(send.clone()).unwrap();
 	}
 
 	async fn list_cameras(&mut self, conn: ConnId) {
@@ -431,14 +424,13 @@ impl Server {
 			cameras: cameras_sendable,
 		};
 
-		let mut msg = "ListOfCameras:".to_owned();
-		let json = serde_json::to_string(&gui_struct).unwrap();
-		msg.push_str(&json);
+		let msg = GUIRequests::ListOfCameras(gui_struct);
+		let send = serde_json::to_string(&msg).unwrap();
 
 		let target = self.gui_sessions.get(&conn);
 
 		if let Some(target) = target {
-			target.send(msg.clone()).unwrap();
+			target.send(send.clone()).unwrap();
 		}
 	}
 
@@ -457,12 +449,11 @@ impl Server {
 			name,
 		};
 
-		let mut msg = "SetNameCamera:".to_owned();
-		let json = serde_json::to_string(&edge_struct).unwrap();
-		msg.push_str(&json);
+		let msg = EdgeRequests::SetNameCamera(edge_struct);
+		let send = serde_json::to_string(&msg).unwrap();
 
 		let target = &self.edge_sessions[&conn_id];
-		target.send(msg.clone()).unwrap();
+		target.send(send.clone()).unwrap();
 	}
 
 	async fn start_viewing_camera(
@@ -496,11 +487,11 @@ impl Server {
 		let edge_struct =
 			datatypes::edge::StartViewingCamera { camera_id: camera };
 
-		let mut msg = "StartViewingCamera:".to_owned();
-		let json = serde_json::to_string(&edge_struct).unwrap();
-		msg.push_str(&json);
+		let msg = EdgeRequests::StartViewingCamera(edge_struct);
+		let send = serde_json::to_string(&msg).unwrap();
+
 		let target = &self.edge_sessions[&edge_conn];
-		target.send(msg.clone()).unwrap();
+		target.send(send.clone()).unwrap();
 	}
 
 	async fn stop_viewing_camera(&mut self, conn: ConnId) {
@@ -522,11 +513,11 @@ impl Server {
 
 		let edge_struct =
 			datatypes::edge::StopViewingCamera { camera_id: route.1 };
-		let mut msg = "StopViewingCamera:".to_owned();
-		let json = serde_json::to_string(&edge_struct).unwrap();
-		msg.push_str(&json);
+		let msg = EdgeRequests::StopViewingCamera(edge_struct);
+		let send = serde_json::to_string(&msg).unwrap();
+
 		let target = &self.edge_sessions[&route.0];
-		target.send(msg.clone()).unwrap();
+		target.send(send.clone()).unwrap();
 	}
 
 	async fn configuration(
@@ -541,40 +532,39 @@ impl Server {
 					return;
 				}
 			},
-			WSSide::Edge => {
+			Edge => {
 				if !self.is_connected(conn, config.camera_id) {
 					return;
 				}
 			},
 		}
 
-		let mut msg = "Configuration:".to_owned();
-
+		let mut send: String;
 		let target: &UnboundedSender<Msg>;
 		match side {
 			WSSide::GUI => {
-				let fwd_config = datatypes::gui::Configuration {
-					conn_id: conn.to_string(),
-					camera_id: config.camera_id,
-					configuration: config.configuration,
-				};
-
-				let json = serde_json::to_string(&fwd_config).unwrap();
-				msg.push_str(&json);
-				target = &self.edge_sessions[&config.conn_id];
-			},
-			WSSide::Edge => {
 				let fwd_config = datatypes::shared::Configuration {
 					conn_id: conn,
 					camera_id: config.camera_id,
 					configuration: config.configuration,
 				};
-				let json = serde_json::to_string(&fwd_config).unwrap();
-				msg.push_str(&json);
+				let msg = EdgeRequests::Configuration(fwd_config);
+				send = serde_json::to_string(&msg).unwrap();
+				target = &self.edge_sessions[&config.conn_id];
+			},
+			WSSide::Edge => {
+				let fwd_config = datatypes::gui::Configuration {
+					conn_id: conn.to_string(),
+					camera_id: config.camera_id,
+					configuration: config.configuration,
+				};
+				let msg = GUIRequests::Configuration(fwd_config);
+				send = serde_json::to_string(&msg).unwrap();
+
 				target = &self.gui_sessions[&config.conn_id];
 			},
 		}
-		target.send(msg.clone()).unwrap();
+		target.send(send.clone()).unwrap();
 	}
 
 	async fn view_camera_config(
@@ -592,11 +582,11 @@ impl Server {
 				camera_id: camera.camera_id,
 			};
 
-		let mut msg = "ViewCameraConfig:".to_owned();
-		let json = serde_json::to_string(&fwd_data).unwrap();
-		msg.push_str(&json);
+		let msg = EdgeRequests::ViewCameraConfig(fwd_data);
+		let send = serde_json::to_string(&msg).unwrap();
+
 		let target = &self.edge_sessions[&camera.conn_id];
-		target.send(msg.clone()).unwrap();
+		target.send(send.clone()).unwrap();
 	}
 
 	async fn forget_camera(
@@ -620,9 +610,10 @@ impl Server {
 					camera: target.camera_id,
 				};
 				if !self.gui_sessions.contains_key(&target.conn_id)
-					&& !target.confirm {
-						return;
-					}
+					&& !target.confirm
+				{
+					return;
+				}
 			},
 		}
 		if !self.cameras.contains_key(&camera) {
@@ -635,18 +626,18 @@ impl Server {
 			_ => return,
 		}
 
-		let mut msg = "ForgetCamera:".to_owned();
-
 		match side {
 			WSSide::Edge => {
-				let send = datatypes::shared::ForgetCameraRequest {
-					conn_id: conn,
+				let data = datatypes::gui::ForgetCamera {
+					conn_id: conn.to_string(),
 					camera_id: target.camera_id,
 					confirm: target.confirm,
 				};
-				msg.push_str(&serde_json::to_string(&send).unwrap());
+				let msg = GUIRequests::ForgetCamera(data);
+				let send = serde_json::to_string(&msg).unwrap();
+
 				self.gui_sessions[&target.conn_id]
-					.send(msg.clone())
+					.send(send.clone())
 					.unwrap();
 
 				if target.confirm {
@@ -658,14 +649,16 @@ impl Server {
 			},
 
 			WSSide::GUI => {
-				let send = datatypes::gui::ForgetCamera {
-					conn_id: conn.to_string(),
+				let data = datatypes::shared::ForgetCameraRequest {
+					conn_id: conn,
 					camera_id: target.camera_id,
 					confirm: target.confirm,
 				};
-				msg.push_str(&serde_json::to_string(&send).unwrap());
+				let msg = EdgeRequests::ForgetCameraRequest(data);
+				let send = serde_json::to_string(&msg).unwrap();
+
 				self.edge_sessions[&target.conn_id]
-					.send(msg.clone())
+					.send(send.clone())
 					.unwrap();
 			},
 		}
@@ -693,9 +686,7 @@ impl Server {
 
 		for gui in self.video_routes.clone() {
 			if gui.1.0 == conn_id && gui.1.1 == camera_id {
-				self.gui_img_route[&gui.0]
-					.send(img.clone())
-					.unwrap();
+				self.gui_img_route[&gui.0].send(img.clone()).unwrap();
 			}
 		}
 	}
@@ -734,56 +725,61 @@ impl Server {
 
 	async fn set_edge_processing(
 		&mut self,
-		_conn_id: ConnId,
 		data: datatypes::gui::SetEdgeProcessingType,
 	) {
-		let mut msg = "SetProcessingType:".to_owned();
-		let send = datatypes::edge::SetProcessingType {
+		let send_data = datatypes::edge::SetProcessingType {
 			processing_type: data.processing_type,
 		};
-		msg.push_str(&serde_json::to_string(&send).unwrap());
+		let msg = EdgeRequests::SetProcessingType(send_data);
+
+		let send = &serde_json::to_string(&msg).unwrap();
 
 		let target = self.edge_sessions.get(&data.edge_id);
 
 		if let Some(target) = target {
-			target.send(msg.clone()).unwrap();
+			target.send(send.clone()).unwrap();
 		}
 	}
 
 	async fn get_default_thresholds(&mut self, conn_id: ConnId) {
-		let mut msg = "DefaultThresholds:".to_owned();
-		let send = datatypes::gui::DefaultThresholds {
+		let data = datatypes::gui::DefaultThresholds {
 			warn_below_threshold: self.default_warn_threshold,
 			alert_below_threshold: self.default_alert_threshold,
 		};
-		msg.push_str(&serde_json::to_string(&send).unwrap());
+
+		let msg = GUIRequests::DefaultThresholds(data);
+
+		let send = &serde_json::to_string(&msg).unwrap();
 		let target = self.gui_sessions.get(&conn_id);
 
 		if let Some(target) = target {
-			target.send(msg.clone()).unwrap();
+			target.send(send.clone()).unwrap();
 		}
 	}
 
 	async fn list_edges(&mut self, conn_id: ConnId) {
-		let mut msg = "ListOfEdges:".to_owned();
 		let mut edge_names_copy = HashMap::new();
 
 		for edge in self.edge_names.clone() {
 			edge_names_copy.insert(edge.0.to_string(), edge.1);
 		}
 
-		let send = datatypes::gui::ListOfEdges {
+		let data = datatypes::gui::ListOfEdges {
 			edges: edge_names_copy,
 		};
-		msg.push_str(&serde_json::to_string(&send).unwrap());
+		let msg = GUIRequests::ListOfEdges(data);
+		let send = &serde_json::to_string(&msg).unwrap();
+
 		let target = self.gui_sessions.get(&conn_id);
 		if let Some(target) = target {
-			target.send(msg.clone()).unwrap();
+			target.send(send.clone()).unwrap();
 		}
 	}
 
 	async fn set_edge_name(&mut self, data: datatypes::gui::SetEdgeName) {
-		if let std::collections::hash_map::Entry::Occupied(mut e) = self.edge_names.entry(data.edge_id) {
+		if let std::collections::hash_map::Entry::Occupied(mut e) =
+			self.edge_names.entry(data.edge_id)
+		{
 			e.insert(data.name);
 		}
 	}
@@ -794,48 +790,51 @@ impl Server {
 		alert: datatypes::edge::Alert,
 		target: Option<ConnId>,
 	) {
-		let mut msg = "Alert:".to_string();
-		let send = datatypes::gui::Alert {
+		let data = datatypes::gui::Alert {
 			conn_id,
 			camera_id: alert.camera_id,
 			alert_code: alert.alert_code,
 			alert_type: alert.alert_type,
 			alert_description: alert.alert_description,
 		};
-		msg.push_str(&*serde_json::to_string(&send).unwrap());
+		let msg = GUIRequests::Alert(data);
+		let send = serde_json::to_string(&msg).unwrap();
 
 		if let Some(target) = target {
 			self.gui_sessions
 				.get(&target)
 				.unwrap()
-				.send(msg.clone())
+				.send(send.clone())
 				.unwrap();
 		} else {
 			for gui in self.gui_sessions.clone() {
-				gui.1.clone().send(msg.clone()).unwrap();
+				gui.1.clone().send(send.clone()).unwrap();
 			}
 		}
 	}
 
-	async fn force_retry_camera(&mut self, data: datatypes::gui::ForceRetryCamera) {
-		let mut msg = "ForceRetryCamera:".to_owned();
-		let send = datatypes::edge::ForceRetryCamera {
+	async fn force_retry_camera(
+		&mut self,
+		data: datatypes::gui::ForceRetryCamera,
+	) {
+		let send_data = datatypes::edge::ForceRetryCamera {
 			camera_id: data.camera_id,
 		};
-		msg.push_str(&serde_json::to_string(&send).unwrap());
+		let msg = EdgeRequests::ForceRetryCamera(send_data);
+		let send = &serde_json::to_string(&msg).unwrap();
 		let target = self.gui_sessions.get(&data.camera_id);
 		if let Some(target) = target {
-			target.send(msg.clone()).unwrap();
+			target.send(send.clone()).unwrap();
 		}
 	}
 
 	async fn list_processing_types(&mut self, conn_id: ConnId) {
-		let mut msg = "list_processing_types:".to_owned();
-		let send = datatypes::gui::ProcessingTypes::default();
-		msg.push_str(&serde_json::to_string(&send).unwrap());
+		let data = datatypes::gui::ProcessingTypes::default();
+		let msg = GUIRequests::ProcessingTypes(data);
+		let send = &serde_json::to_string(&msg).unwrap();
 		let target = self.gui_sessions.get(&conn_id);
 		if let Some(target) = target {
-			target.send(msg.clone()).unwrap();
+			target.send(send.clone()).unwrap();
 		}
 	}
 
@@ -917,8 +916,8 @@ impl Server {
 					self.set_default_thresholds(data).await;
 				},
 
-				Command::SetEdgeProcessingType { conn, data } => {
-					self.set_edge_processing(conn, data).await;
+				Command::SetEdgeProcessingType { data } => {
+					self.set_edge_processing(data).await;
 				},
 
 				Command::GetDefaultThresholds { conn } => {
@@ -941,13 +940,13 @@ impl Server {
 					self.send_alert(None, data, target).await;
 				},
 
-				Command::ForceRetryCamera {data} => {
+				Command::ForceRetryCamera { data } => {
 					self.force_retry_camera(data).await;
-				}
+				},
 
 				Command::ListProcessingTypes { conn } => {
 					self.list_processing_types(conn).await;
-				}
+				},
 			}
 		}
 		Ok(())
@@ -1120,11 +1119,10 @@ impl ServerHandle {
 
 	pub async fn set_edge_processing_type(
 		&self,
-		conn: ConnId,
 		data: datatypes::gui::SetEdgeProcessingType,
 	) {
 		self.cmd_tx
-			.send(Command::SetEdgeProcessingType { conn, data })
+			.send(Command::SetEdgeProcessingType { data })
 			.unwrap();
 	}
 
@@ -1142,19 +1140,30 @@ impl ServerHandle {
 		self.cmd_tx.send(Command::SetEdgeName { data }).unwrap();
 	}
 
-	pub async fn alert_from_edge(&self, conn: ConnId, data: datatypes::edge::Alert) {
+	pub async fn alert_from_edge(
+		&self,
+		conn: ConnId,
+		data: datatypes::edge::Alert,
+	) {
 		self.cmd_tx
 			.send(Command::AlertFromEdge { conn, data })
 			.unwrap();
 	}
 
-	pub async fn alert_from_server(&self, data: datatypes::edge::Alert, target: Option<ConnId>) {
+	pub async fn alert_from_server(
+		&self,
+		data: datatypes::edge::Alert,
+		target: Option<ConnId>,
+	) {
 		self.cmd_tx
 			.send(Command::AlertFromServer { data, target })
 			.unwrap();
 	}
 
-	pub async fn force_retry_camera(&self, data: datatypes::gui::ForceRetryCamera) {
+	pub async fn force_retry_camera(
+		&self,
+		data: datatypes::gui::ForceRetryCamera,
+	) {
 		self.cmd_tx
 			.send(Command::ForceRetryCamera { data })
 			.unwrap();
