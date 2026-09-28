@@ -41,7 +41,8 @@ pub async fn ws_handler(
 		},
 	}
 
-	let conn_id = server.connect(conn_tx, side, send_img_tx).await;
+	let mut conn_id = server.connect(conn_tx, side, send_img_tx).await;
+	let mut initialising = true;
 
 	match side {
 		WSSide::GUI => {
@@ -74,7 +75,7 @@ pub async fn ws_handler(
 
 					AggregatedMessage::Text(text) => {
 						last_heartbeat = Instant::now();
-						process_ws(&server, &text, conn_id, side)
+						process_ws(&server, &text, &mut conn_id, side, &mut initialising)
 							.await;
 					}
 
@@ -154,15 +155,16 @@ pub async fn ws_handler(
 async fn process_ws(
 	server: &ServerHandle,
 	text: &str,
-	conn: ConnId,
+	conn: &mut ConnId,
 	side: WSSide,
+	initialising: &mut bool,
 ) {
 	match side {
 		WSSide::Edge => {
-			edge_process(server, text, conn).await;
+			edge_process(server, text, conn, initialising).await;
 		},
 		WSSide::GUI => {
-			gui_process(server, text, conn).await;
+			gui_process(server, text, *conn).await;
 		},
 	}
 	// this should contain the actual logic to deal with incoming text strings
@@ -182,7 +184,10 @@ async fn gui_process(server: &ServerHandle, text: &str, conn: ConnId) {
 		serde_json::from_str(msg);
 
 	let Ok(data) = data_unchecked else {
-		eprintln!("Message could not deserialized due to: {:?}", data_unchecked.err().unwrap().to_string());
+		eprintln!(
+			"Message could not deserialized due to: {:?}",
+			data_unchecked.err().unwrap().to_string()
+		);
 		return;
 	};
 
@@ -199,9 +204,7 @@ async fn gui_process(server: &ServerHandle, text: &str, conn: ConnId) {
 			server.configuration(conn, data, WSSide::GUI).await
 		},
 
-		ServerRequests::SetEdgeName(data) => {
-			server.set_edge_name(data).await
-		},
+		ServerRequests::SetEdgeName(data) => server.set_edge_name(data).await,
 
 		ServerRequests::SetEdgeProcessingType(data) => {
 			server.set_edge_processing_type(data).await
@@ -251,7 +254,12 @@ async fn gui_process(server: &ServerHandle, text: &str, conn: ConnId) {
 	}
 }
 
-async fn edge_process(server: &ServerHandle, text: &str, conn: ConnId) {
+async fn edge_process(
+	server: &ServerHandle,
+	text: &str,
+	conn: &mut ConnId,
+	initialising: &mut bool,
+) {
 	let msg = text.trim();
 
 	println!("Received from Edge: {msg}");
@@ -260,40 +268,60 @@ async fn edge_process(server: &ServerHandle, text: &str, conn: ConnId) {
 		serde_json::from_str(msg);
 
 	let Ok(data) = data_unchecked else {
-		eprintln!("Message could not deserialized due to: {:?}", data_unchecked.err().unwrap().to_string());
+		eprintln!(
+			"Message could not deserialized due to: {:?}",
+			data_unchecked.err().unwrap().to_string()
+		);
 		return;
 	};
 
 	match data {
-		datatypes::edge::ServerRequests::InitialiseConnection(data) => {}, //TODO: not yet implemented
+		datatypes::edge::ServerRequests::InitialiseConnection(data) => {
+			if *initialising == false {
+				eprintln!(
+					"Already initialised connection tried initialising: {:?}",
+					*conn
+				);
+				return;
+			}
+
+			let real_conn_id = data.edge_id;
+			let success = server.initialise(*conn, data).await;
+
+			if !success {
+				eprintln!("Error initialising connection: {:?}", *conn);
+			}
+
+			*conn = real_conn_id;
+			*initialising = false;
+		},
 
 		datatypes::edge::ServerRequests::RegisterCameras(data) => {
-			server.register_cameras(conn, data.cameras).await
+			server.register_cameras(*conn, data.cameras).await
 		},
 
 		datatypes::edge::ServerRequests::UpdateCameraStatus(data) => {
-			server.update_camera_status(conn, data).await
+			server.update_camera_status(*conn, data).await
 		},
 
 		datatypes::edge::ServerRequests::ImageAnalysis(data) => {
-			server.image_analysis(conn, data).await
+			server.image_analysis(*conn, data).await
 		},
 
 		datatypes::edge::ServerRequests::Configuration(data) => {
-			server.configuration(conn, data, WSSide::Edge).await
+			server.configuration(*conn, data, WSSide::Edge).await
 		},
 
 		datatypes::edge::ServerRequests::ForgetCameraRequest(data) => {
-			server.forget_camera(conn, data, WSSide::Edge).await
+			server.forget_camera(*conn, data, WSSide::Edge).await
 		},
 
 		datatypes::edge::ServerRequests::Alert(data) => {
-			server.alert_from_edge(conn, data).await
+			server.alert_from_edge(*conn, data).await
 		},
 
 		_ => {
 			eprintln!("Message not recognised");
 		},
 	}
-
 }

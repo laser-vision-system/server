@@ -27,6 +27,12 @@ enum Command {
 		img_tx: Option<UnboundedSender<Bytes>>,
 	},
 
+	Initialise {
+		conn: ConnId,
+		data: datatypes::edge::InitialiseConnection,
+		res_tx: oneshot::Sender<bool>,
+	},
+
 	Disconnect {
 		conn: ConnId,
 		side: WSSide,
@@ -155,6 +161,8 @@ pub struct Server {
 
 	gui_img_route: HashMap<ConnId, UnboundedSender<Bytes>>,
 
+	edge_initialising: HashMap<ConnId, UnboundedSender<Msg>>,
+
 	edge_sessions: HashMap<ConnId, UnboundedSender<Msg>>,
 
 	edge_names: HashMap<ConnId, String>,
@@ -177,6 +185,7 @@ impl Server {
 			Self {
 				gui_sessions: HashMap::new(),
 				gui_img_route: HashMap::new(),
+				edge_initialising: HashMap::new(),
 				edge_sessions: HashMap::new(),
 				edge_names: HashMap::new(),
 				cameras: HashMap::new(),
@@ -202,16 +211,39 @@ impl Server {
 				self.gui_img_route.insert(id, img_tx.unwrap());
 			},
 			WSSide::Edge => {
-				self.edge_sessions.insert(id, tx);
-				self.edge_names
-					.insert(id, format!("Edge {}", self.edge_names.len()));
-				for gui in self.gui_sessions.clone().keys() {
-					self.list_edges(*gui).await;
-				}
+				self.edge_initialising.insert(id, tx);
 			},
 		}
 
 		id
+	}
+
+	async fn initialise(
+		&mut self,
+		conn: ConnId,
+		data: datatypes::edge::InitialiseConnection,
+		res_tx: oneshot::Sender<bool>,
+	) {
+		if !self.edge_initialising.contains_key(&conn) {
+			eprintln!("Invalid connection id passed to server");
+			res_tx.send(false).unwrap();
+			return;
+		}
+
+		let tx = self.edge_initialising.remove(&conn).unwrap();
+		self.edge_sessions.insert(data.edge_id, tx);
+		if !self.edge_names.contains_key(&data.edge_id) {
+			self.edge_names.insert(
+				data.edge_id,
+				format!("Edge {:?}", self.edge_names.len()),
+			);
+		}
+
+		for gui in self.gui_sessions.clone().keys() {
+			self.list_edges(*gui).await;
+		}
+
+		res_tx.send(true).unwrap();
 	}
 
 	async fn disconnect(&mut self, conn_id: ConnId, side: WSSide) {
@@ -849,6 +881,10 @@ impl Server {
 					let _ = res_tx.send(conn_id);
 				},
 
+				Command::Initialise { conn, data, res_tx } => {
+					self.initialise(conn, data, res_tx).await;
+				},
+
 				Command::Disconnect { conn, side } => {
 					self.disconnect(conn, side).await;
 				},
@@ -972,6 +1008,20 @@ impl ServerHandle {
 				side,
 				img_tx,
 			})
+			.unwrap();
+
+		res_rx.await.unwrap()
+	}
+
+	pub async fn initialise(
+		&self,
+		conn: ConnId,
+		data: datatypes::edge::InitialiseConnection,
+	) -> bool {
+		let (res_tx, res_rx) = oneshot::channel();
+
+		self.cmd_tx
+			.send(Command::Initialise { conn, data, res_tx })
 			.unwrap();
 
 		res_rx.await.unwrap()
