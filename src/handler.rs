@@ -1,15 +1,17 @@
 use std::time::{Duration, Instant};
 
-use actix_ws::{AggregatedMessage, CloseReason};
+use actix_ws::{AggregatedMessage, CloseCode, CloseReason, Message};
 use datatypes::shared::ConnId;
 use futures_util::StreamExt as _;
 use serde::Serialize;
 use serde_json::Result;
 use server_edge_datatypes as datatypes;
-use server_edge_datatypes::gui::ServerRequests;
+use server_edge_datatypes::gui::ServerRequests as GUIServerRequests;
+use server_edge_datatypes::edge::ServerRequests as EdgeServerRequests;
 use tokio::{sync::mpsc, time::interval};
 
 use crate::{ServerHandle, WSSide};
+use rand::{self, RngExt as _};
 
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(2);
 const CLIENT_TIMEOUT: Duration = Duration::from_secs(5);
@@ -25,24 +27,54 @@ pub async fn ws_handler(
 	let mut last_heartbeat = Instant::now();
 	let mut interval = interval(HEARTBEAT_INTERVAL);
 
+	let mut msg_stream = msg_stream
+		.max_frame_size(20 * 1024 * 1024)
+		.aggregate_continuations()
+		.max_continuation_size(2 * 1024 * 1024);
+
 	let (conn_tx, mut conn_rx) = mpsc::unbounded_channel();
 
 	let (img_tx, mut img_rx) = mpsc::unbounded_channel();
 
-	let send_img_tx;
+	let send_img_tx= match side {
+		WSSide::GUI => Some(img_tx),
+		WSSide::Edge => None,
+	};
 
-	match side {
-		WSSide::Edge => {
-			send_img_tx = None;
-		},
-
-		WSSide::GUI => {
-			send_img_tx = Some(img_tx);
-		},
+	if side == WSSide::Edge {
+		img_rx.close()
 	}
 
-	let mut conn_id = server.connect(conn_tx, side, send_img_tx).await;
-	let mut initialising = true;
+	let conn_id = match side {
+		WSSide::GUI => rand::rng().random::<ConnId>(),
+		WSSide::Edge => {
+			let Some(data) = initialise_edge_connection(&mut msg_stream).await else {
+				let _ = session.close(Some(CloseReason{
+					code: CloseCode::Protocol,
+					description: Some(
+						"Edge connections must send an initialisation command before any other data"
+							.to_string()
+						)
+					}
+				));
+				return
+			};
+			data
+		}
+	};
+
+	if !server.connect(conn_tx, conn_id, side, send_img_tx).await {
+		eprintln!("Invalid edge ID");
+		let _ = session.close(Some(CloseReason{
+			code: CloseCode::Invalid,
+			description: Some(
+				"Invalid ID for initialisation: ID already in use"
+					.to_string()
+			)
+		}
+		));
+		return;
+	}
 
 	match side {
 		WSSide::GUI => {
@@ -53,11 +85,6 @@ pub async fn ws_handler(
 			println!("Edge connected: {conn_id}");
 		},
 	}
-
-	let mut msg_stream = msg_stream
-		.max_frame_size(20 * 1024 * 1024)
-		.aggregate_continuations()
-		.max_continuation_size(2 * 1024 * 1024);
 
 	let close_reason: Option<CloseReason> = loop {
 		tokio::select! { //waits for the first of the following events:
@@ -75,7 +102,7 @@ pub async fn ws_handler(
 
 					AggregatedMessage::Text(text) => {
 						last_heartbeat = Instant::now();
-						process_ws(&server, &text, &mut conn_id, side, &mut initialising)
+						process_ws(&server, &text, conn_id, side)
 							.await;
 					}
 
@@ -152,24 +179,40 @@ pub async fn ws_handler(
 	let _ = session.close(close_reason).await;
 }
 
+async fn initialise_edge_connection(msg_stream: &mut actix_ws::AggregatedMessageStream) -> Option<ConnId> {
+	let Some(Ok(AggregatedMessage::Text(text))) = msg_stream.next().await else {
+		eprintln!("Websocket stream received invalid input while waiting for initialisation");
+		return None
+	};
+
+	let msg = text.trim();
+	let data_unchecked = serde_json::from_str::<datatypes::edge::ServerRequests>(&msg);
+	let Ok(command) = data_unchecked else {
+		eprintln!("Websocket stream received invalid text input while waiting for initialisation");
+		return None
+	};
+
+	let datatypes::edge::ServerRequests::InitialiseConnection(data) = command else {
+		eprintln!("Websocket stream received invalid command while waiting for initialisation");
+		return None
+	};
+	Some(data.edge_id)
+}
+
 async fn process_ws(
 	server: &ServerHandle,
 	text: &str,
-	conn: &mut ConnId,
+	conn: ConnId,
 	side: WSSide,
-	initialising: &mut bool,
 ) {
 	match side {
 		WSSide::Edge => {
-			edge_process(server, text, conn, initialising).await;
+			edge_process(server, text, conn).await;
 		},
 		WSSide::GUI => {
-			gui_process(server, text, *conn).await;
+			gui_process(server, text, conn).await;
 		},
 	}
-	// this should contain the actual logic to deal with incoming text strings
-	// from the websockets. Whether this needs to divide into edge and gui
-	// functions right away is tbd
 }
 
 async fn gui_process(server: &ServerHandle, text: &str, conn: ConnId) {
@@ -180,7 +223,7 @@ async fn gui_process(server: &ServerHandle, text: &str, conn: ConnId) {
 
 	println!("Received from GUI: {msg}");
 
-	let data_unchecked: Result<datatypes::gui::ServerRequests> =
+	let data_unchecked: Result<GUIServerRequests> =
 		serde_json::from_str(msg);
 
 	let Ok(data) = data_unchecked else {
@@ -192,59 +235,59 @@ async fn gui_process(server: &ServerHandle, text: &str, conn: ConnId) {
 	};
 
 	match data {
-		ServerRequests::ListEdges => server.list_edges(conn).await,
+		GUIServerRequests::ListEdges => server.list_edges(conn).await,
 
-		ServerRequests::ListCameras => server.list_cameras(conn).await,
+		GUIServerRequests::ListCameras => server.list_cameras(conn).await,
 
-		ServerRequests::ViewCameraConfig(data) => {
+		GUIServerRequests::ViewCameraConfig(data) => {
 			server.view_camera_config(conn, data).await
 		},
 
-		ServerRequests::Configuration(data) => {
+		GUIServerRequests::Configuration(data) => {
 			server.configuration(conn, data, WSSide::GUI).await
 		},
 
-		ServerRequests::SetEdgeName(data) => server.set_edge_name(data).await,
+		GUIServerRequests::SetEdgeName(data) => server.set_edge_name(data).await,
 
-		ServerRequests::SetEdgeProcessingType(data) => {
+		GUIServerRequests::SetEdgeProcessingType(data) => {
 			server.set_edge_processing_type(data).await
 		},
 
-		ServerRequests::SetCameraThresholds(data) => {
+		GUIServerRequests::SetCameraThresholds(data) => {
 			server.set_camera_thresholds(data).await
 		},
 
-		ServerRequests::SetDefaultThreshold(data) => {
+		GUIServerRequests::SetDefaultThreshold(data) => {
 			server.set_default_thresholds(data).await
 		},
 
-		ServerRequests::GetDefaultThresholds => {
+		GUIServerRequests::GetDefaultThresholds => {
 			server.get_default_thresholds(conn).await
 		},
 
-		ServerRequests::SetNameCamera(data) => {
+		GUIServerRequests::SetNameCamera(data) => {
 			server.set_name_camera(data).await
 		},
 
-		ServerRequests::StartViewingCamera(data) => {
+		GUIServerRequests::StartViewingCamera(data) => {
 			server.start_viewing_camera(conn, data).await
 		},
 
-		ServerRequests::StopViewingCamera => {
+		GUIServerRequests::StopViewingCamera => {
 			server.stop_viewing_camera(conn).await
 		},
 
-		ServerRequests::Setpoint(data) => server.setpoint(Some(data)).await,
+		GUIServerRequests::Setpoint(data) => server.setpoint(Some(data)).await,
 
-		ServerRequests::ForgetCameraRequest(data) => {
+		GUIServerRequests::ForgetCameraRequest(data) => {
 			server.forget_camera(conn, data, WSSide::GUI).await
 		},
 
-		ServerRequests::ForceRetryCamera(data) => {
+		GUIServerRequests::ForceRetryCamera(data) => {
 			server.force_retry_camera(data).await
 		},
 
-		ServerRequests::ListProcessingTypes => {
+		GUIServerRequests::ListProcessingTypes => {
 			server.list_processing_types(conn).await
 		},
 
@@ -254,17 +297,12 @@ async fn gui_process(server: &ServerHandle, text: &str, conn: ConnId) {
 	}
 }
 
-async fn edge_process(
-	server: &ServerHandle,
-	text: &str,
-	conn: &mut ConnId,
-	initialising: &mut bool,
-) {
+async fn edge_process(server: &ServerHandle, text: &str, conn: ConnId,) {
 	let msg = text.trim();
 
 	println!("Received from Edge: {msg}");
 
-	let data_unchecked: Result<datatypes::edge::ServerRequests> =
+	let data_unchecked: Result<EdgeServerRequests> =
 		serde_json::from_str(msg);
 
 	let Ok(data) = data_unchecked else {
@@ -276,48 +314,35 @@ async fn edge_process(
 	};
 
 	match data {
-		datatypes::edge::ServerRequests::InitialiseConnection(data) => {
-			if *initialising == false {
-				eprintln!(
-					"Already initialised connection tried initialising: {:?}",
-					*conn
-				);
-				return;
-			}
-
-			let real_conn_id = data.edge_id;
-			let success = server.initialise(*conn, data).await;
-
-			if !success {
-				eprintln!("Error initialising connection: {:?}", *conn);
-			}
-
-			*conn = real_conn_id;
-			*initialising = false;
+		EdgeServerRequests::InitialiseConnection(_) => {
+			eprintln!(
+				"Already initialised connection tried initialising: {:?}",
+				conn
+			);
 		},
 
-		datatypes::edge::ServerRequests::RegisterCameras(data) => {
-			server.register_cameras(*conn, data.cameras).await
+		EdgeServerRequests::RegisterCameras(data) => {
+			server.register_cameras(conn, data.cameras).await
 		},
 
-		datatypes::edge::ServerRequests::UpdateCameraStatus(data) => {
-			server.update_camera_status(*conn, data).await
+		EdgeServerRequests::UpdateCameraStatus(data) => {
+			server.update_camera_status(conn, data).await
 		},
 
-		datatypes::edge::ServerRequests::ImageAnalysis(data) => {
-			server.image_analysis(*conn, data).await
+		EdgeServerRequests::ImageAnalysis(data) => {
+			server.image_analysis(conn, data).await
 		},
 
-		datatypes::edge::ServerRequests::Configuration(data) => {
-			server.configuration(*conn, data, WSSide::Edge).await
+		EdgeServerRequests::Configuration(data) => {
+			server.configuration(conn, data, WSSide::Edge).await
 		},
 
-		datatypes::edge::ServerRequests::ForgetCameraRequest(data) => {
-			server.forget_camera(*conn, data, WSSide::Edge).await
+		EdgeServerRequests::ForgetCameraRequest(data) => {
+			server.forget_camera(conn, data, WSSide::Edge).await
 		},
 
-		datatypes::edge::ServerRequests::Alert(data) => {
-			server.alert_from_edge(*conn, data).await
+		EdgeServerRequests::Alert(data) => {
+			server.alert_from_edge(conn, data).await
 		},
 
 		_ => {

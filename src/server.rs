@@ -22,15 +22,10 @@ use crate::{Msg, WSSide};
 enum Command {
 	Connect {
 		conn_tx: UnboundedSender<Msg>,
-		res_tx: oneshot::Sender<ConnId>,
+		res_tx: oneshot::Sender<bool>,
+		conn_id: ConnId,
 		side: WSSide,
 		img_tx: Option<UnboundedSender<Bytes>>,
-	},
-
-	Initialise {
-		conn: ConnId,
-		data: datatypes::edge::InitialiseConnection,
-		res_tx: oneshot::Sender<bool>,
 	},
 
 	Disconnect {
@@ -161,8 +156,6 @@ pub struct Server {
 
 	gui_img_route: HashMap<ConnId, UnboundedSender<Bytes>>,
 
-	edge_initialising: HashMap<ConnId, UnboundedSender<Msg>>,
-
 	edge_sessions: HashMap<ConnId, UnboundedSender<Msg>>,
 
 	edge_names: HashMap<ConnId, String>,
@@ -185,7 +178,6 @@ impl Server {
 			Self {
 				gui_sessions: HashMap::new(),
 				gui_img_route: HashMap::new(),
-				edge_initialising: HashMap::new(),
 				edge_sessions: HashMap::new(),
 				edge_names: HashMap::new(),
 				cameras: HashMap::new(),
@@ -202,48 +194,30 @@ impl Server {
 		&mut self,
 		tx: UnboundedSender<Msg>,
 		img_tx: Option<UnboundedSender<Bytes>>,
+		conn_id: ConnId,
 		side: WSSide,
-	) -> ConnId {
-		let id = rand::rng().random::<ConnId>();
+	) -> bool {
 		match side {
 			WSSide::GUI => {
-				self.gui_sessions.insert(id, tx);
-				self.gui_img_route.insert(id, img_tx.unwrap());
+				self.gui_sessions.insert(conn_id, tx);
+				self.gui_img_route.insert(conn_id, img_tx.unwrap());
 			},
 			WSSide::Edge => {
-				self.edge_initialising.insert(id, tx);
+				if self.edge_sessions.contains_key(&conn_id) {
+					return false
+				}
+
+				self.edge_sessions.insert(conn_id, tx);
+				if !self.edge_names.contains_key(&conn_id) {
+					self.edge_names.insert(conn_id, format!("Edge {}", self.edge_names.len()));
+				}
+
+				for gui in self.gui_sessions.clone().keys() {
+					self.list_edges(*gui).await;
+				}
 			},
 		}
-
-		id
-	}
-
-	async fn initialise(
-		&mut self,
-		conn: ConnId,
-		data: datatypes::edge::InitialiseConnection,
-		res_tx: oneshot::Sender<bool>,
-	) {
-		if !self.edge_initialising.contains_key(&conn) {
-			eprintln!("Invalid connection id passed to server");
-			res_tx.send(false).unwrap();
-			return;
-		}
-
-		let tx = self.edge_initialising.remove(&conn).unwrap();
-		self.edge_sessions.insert(data.edge_id, tx);
-		if !self.edge_names.contains_key(&data.edge_id) {
-			self.edge_names.insert(
-				data.edge_id,
-				format!("Edge {:?}", self.edge_names.len()),
-			);
-		}
-
-		for gui in self.gui_sessions.clone().keys() {
-			self.list_edges(*gui).await;
-		}
-
-		res_tx.send(true).unwrap();
+		true
 	}
 
 	async fn disconnect(&mut self, conn_id: ConnId, side: WSSide) {
@@ -874,15 +848,12 @@ impl Server {
 				Command::Connect {
 					conn_tx,
 					res_tx,
+					conn_id,
 					side,
 					img_tx,
 				} => {
-					let conn_id = self.connect(conn_tx, img_tx, side).await;
-					let _ = res_tx.send(conn_id);
-				},
-
-				Command::Initialise { conn, data, res_tx } => {
-					self.initialise(conn, data, res_tx).await;
+					let success = self.connect(conn_tx, img_tx, conn_id, side).await;
+					let _ = res_tx.send(success);
 				},
 
 				Command::Disconnect { conn, side } => {
@@ -996,32 +967,20 @@ impl ServerHandle {
 	pub async fn connect(
 		&self,
 		conn_tx: UnboundedSender<Msg>,
+		conn_id: ConnId,
 		side: WSSide,
 		img_tx: Option<UnboundedSender<Bytes>>,
-	) -> ConnId {
+	) -> bool {
 		let (res_tx, res_rx) = oneshot::channel();
 
 		self.cmd_tx
 			.send(Command::Connect {
 				conn_tx,
 				res_tx,
+				conn_id,
 				side,
 				img_tx,
 			})
-			.unwrap();
-
-		res_rx.await.unwrap()
-	}
-
-	pub async fn initialise(
-		&self,
-		conn: ConnId,
-		data: datatypes::edge::InitialiseConnection,
-	) -> bool {
-		let (res_tx, res_rx) = oneshot::channel();
-
-		self.cmd_tx
-			.send(Command::Initialise { conn, data, res_tx })
 			.unwrap();
 
 		res_rx.await.unwrap()
