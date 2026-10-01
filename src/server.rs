@@ -167,6 +167,10 @@ pub struct Server {
 
 	default_alert_threshold: Deviation,
 
+	default_warn_above_threshold: Deviation,
+
+	default_alert_above_threshold: Deviation,
+
 	cmd_rx: mpsc::UnboundedReceiver<Command>,
 }
 
@@ -183,6 +187,8 @@ impl Server {
 				video_routes: HashMap::new(),
 				default_warn_threshold: 0.9,
 				default_alert_threshold: 0.8,
+				default_warn_above_threshold: 1.1,
+				default_alert_above_threshold: 1.2,
 				cmd_rx: rx,
 			},
 			ServerHandle { cmd_tx: tx },
@@ -283,6 +289,8 @@ impl Server {
 
 			let mut warn_below_threshold = self.default_warn_threshold;
 			let mut alert_below_threshold = self.default_alert_threshold;
+			let mut alert_above_threshold = self.default_alert_above_threshold;
+			let mut warn_above_threshold = self.default_warn_above_threshold;
 
 			if self.cameras.contains_key(&UniqueCameraID {
 				conn,
@@ -294,6 +302,8 @@ impl Server {
 				}];
 				warn_below_threshold = old_details.warn_below_threshold;
 				alert_below_threshold = old_details.alert_below_threshold;
+				alert_above_threshold = old_details.alert_above_threshold;
+				warn_above_threshold = old_details.warn_above_threshold;
 			}
 
 			let camera_details = CameraDetails {
@@ -301,6 +311,8 @@ impl Server {
 				state: camera.1.status,
 				warn_below_threshold,
 				alert_below_threshold,
+				warn_above_threshold,
+				alert_above_threshold,
 			};
 			self.cameras.insert(
 				UniqueCameraID {
@@ -333,6 +345,8 @@ impl Server {
 			state: data.status,
 			warn_below_threshold: details.warn_below_threshold,
 			alert_below_threshold: details.alert_below_threshold,
+			warn_above_threshold: details.warn_above_threshold,
+			alert_above_threshold: details.alert_above_threshold,
 		};
 		self.cameras.insert(
 			UniqueCameraID {
@@ -706,6 +720,8 @@ impl Server {
 				state: old_details.state,
 				warn_below_threshold: data.warn_below_threshold,
 				alert_below_threshold: data.alert_below_threshold,
+				warn_above_threshold: data.warn_above_threshold,
+				alert_above_threshold: data.alert_above_threshold,
 			};
 			self.cameras.insert(camera, new_details);
 
@@ -721,6 +737,8 @@ impl Server {
 	) {
 		self.default_warn_threshold = data.warn_below_threshold;
 		self.default_alert_threshold = data.alert_below_threshold;
+		self.default_warn_above_threshold = data.warn_above_threshold;
+		self.default_alert_above_threshold = data.alert_above_threshold;
 	}
 
 	async fn set_edge_processing(
@@ -745,6 +763,8 @@ impl Server {
 		let data = datatypes::gui::DefaultThresholds {
 			warn_below_threshold: self.default_warn_threshold,
 			alert_below_threshold: self.default_alert_threshold,
+			warn_above_threshold: self.default_warn_above_threshold,
+			alert_above_threshold: self.default_alert_above_threshold,
 		};
 
 		let msg = GUIRequests::DefaultThresholds(data);
