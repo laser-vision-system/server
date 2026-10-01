@@ -22,7 +22,8 @@ use crate::{Msg, WSSide};
 enum Command {
 	Connect {
 		conn_tx: UnboundedSender<Msg>,
-		res_tx: oneshot::Sender<ConnId>,
+		res_tx: oneshot::Sender<bool>,
+		conn_id: ConnId,
 		side: WSSide,
 		img_tx: Option<UnboundedSender<Bytes>>,
 	},
@@ -199,25 +200,30 @@ impl Server {
 		&mut self,
 		tx: UnboundedSender<Msg>,
 		img_tx: Option<UnboundedSender<Bytes>>,
+		conn_id: ConnId,
 		side: WSSide,
-	) -> ConnId {
-		let id = rand::rng().random::<ConnId>();
+	) -> bool {
 		match side {
 			WSSide::GUI => {
-				self.gui_sessions.insert(id, tx);
-				self.gui_img_route.insert(id, img_tx.unwrap());
+				self.gui_sessions.insert(conn_id, tx);
+				self.gui_img_route.insert(conn_id, img_tx.unwrap());
 			},
 			WSSide::Edge => {
-				self.edge_sessions.insert(id, tx);
-				self.edge_names
-					.insert(id, format!("Edge {}", self.edge_names.len()));
+				if self.edge_sessions.contains_key(&conn_id) {
+					return false
+				}
+
+				self.edge_sessions.insert(conn_id, tx);
+				if !self.edge_names.contains_key(&conn_id) {
+					self.edge_names.insert(conn_id, format!("Edge {}", self.edge_names.len()));
+				}
+
 				for gui in self.gui_sessions.clone().keys() {
 					self.list_edges(*gui).await;
 				}
 			},
 		}
-
-		id
+		true
 	}
 
 	async fn disconnect(&mut self, conn_id: ConnId, side: WSSide) {
@@ -553,8 +559,8 @@ impl Server {
 			},
 		}
 
-		let mut send: String;
-		let target: &UnboundedSender<Msg>;
+		let send: String;
+		let target: Option<&UnboundedSender<Msg>>;
 		match side {
 			WSSide::GUI => {
 				let fwd_config = datatypes::shared::Configuration {
@@ -564,7 +570,7 @@ impl Server {
 				};
 				let msg = EdgeRequests::Configuration(fwd_config);
 				send = serde_json::to_string(&msg).unwrap();
-				target = &self.edge_sessions[&config.conn_id];
+				target = self.edge_sessions.get(&config.conn_id);
 			},
 			WSSide::Edge => {
 				let fwd_config = datatypes::gui::Configuration {
@@ -575,9 +581,12 @@ impl Server {
 				let msg = GUIRequests::Configuration(fwd_config);
 				send = serde_json::to_string(&msg).unwrap();
 
-				target = &self.gui_sessions[&config.conn_id];
+				target = self.gui_sessions.get(&config.conn_id);
 			},
 		}
+		let Some(target) = target else {
+			return;
+		};
 		target.send(send.clone()).unwrap();
 	}
 
@@ -650,8 +659,11 @@ impl Server {
 				let msg = GUIRequests::ForgetCamera(data);
 				let send = serde_json::to_string(&msg).unwrap();
 
-				self.gui_sessions[&target.conn_id]
-					.send(send.clone())
+				let Some(gui) = self.gui_sessions.get(&target.conn_id) else {
+					return
+				};
+
+				gui.send(send.clone())
 					.unwrap();
 
 				if target.confirm {
@@ -862,11 +874,12 @@ impl Server {
 				Command::Connect {
 					conn_tx,
 					res_tx,
+					conn_id,
 					side,
 					img_tx,
 				} => {
-					let conn_id = self.connect(conn_tx, img_tx, side).await;
-					let _ = res_tx.send(conn_id);
+					let success = self.connect(conn_tx, img_tx, conn_id, side).await;
+					let _ = res_tx.send(success);
 				},
 
 				Command::Disconnect { conn, side } => {
@@ -980,15 +993,17 @@ impl ServerHandle {
 	pub async fn connect(
 		&self,
 		conn_tx: UnboundedSender<Msg>,
+		conn_id: ConnId,
 		side: WSSide,
 		img_tx: Option<UnboundedSender<Bytes>>,
-	) -> ConnId {
+	) -> bool {
 		let (res_tx, res_rx) = oneshot::channel();
 
 		self.cmd_tx
 			.send(Command::Connect {
 				conn_tx,
 				res_tx,
+				conn_id,
 				side,
 				img_tx,
 			})

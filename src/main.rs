@@ -16,7 +16,7 @@ use crate::file_manager::FileManager;
 
 pub type Msg = String;
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 enum WSSide {
 	Edge,
 	GUI,
