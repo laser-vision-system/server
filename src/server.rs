@@ -545,8 +545,8 @@ impl Server {
 			},
 		}
 
-		let mut send: String;
-		let target: &UnboundedSender<Msg>;
+		let send: String;
+		let target: Option<&UnboundedSender<Msg>>;
 		match side {
 			WSSide::GUI => {
 				let fwd_config = datatypes::shared::Configuration {
@@ -556,7 +556,7 @@ impl Server {
 				};
 				let msg = EdgeRequests::Configuration(fwd_config);
 				send = serde_json::to_string(&msg).unwrap();
-				target = &self.edge_sessions[&config.conn_id];
+				target = self.edge_sessions.get(&config.conn_id);
 			},
 			WSSide::Edge => {
 				let fwd_config = datatypes::gui::Configuration {
@@ -567,9 +567,12 @@ impl Server {
 				let msg = GUIRequests::Configuration(fwd_config);
 				send = serde_json::to_string(&msg).unwrap();
 
-				target = &self.gui_sessions[&config.conn_id];
+				target = self.gui_sessions.get(&config.conn_id);
 			},
 		}
+		let Some(target) = target else {
+			return;
+		};
 		target.send(send.clone()).unwrap();
 	}
 
@@ -642,8 +645,11 @@ impl Server {
 				let msg = GUIRequests::ForgetCamera(data);
 				let send = serde_json::to_string(&msg).unwrap();
 
-				self.gui_sessions[&target.conn_id]
-					.send(send.clone())
+				let Some(gui) = self.gui_sessions.get(&target.conn_id) else {
+					return
+				};
+
+				gui.send(send.clone())
 					.unwrap();
 
 				if target.confirm {

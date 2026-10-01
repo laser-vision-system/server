@@ -217,7 +217,7 @@ async fn process_ws(
 
 async fn gui_process(server: &ServerHandle, text: &str, conn: ConnId) {
 	let msg = text.trim();
-	if msg == "Ping" {
+    if msg == "\"Ping\"" || msg == "Ping" {
 		return;
 	}
 
