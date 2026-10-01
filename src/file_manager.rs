@@ -11,6 +11,7 @@ use actix_web::{
 	http::{StatusCode, header::ContentType},
 };
 use server_edge_datatypes as datatypes;
+use server_edge_datatypes::edge::Settings;
 use tokio::sync::{mpsc, oneshot};
 
 #[derive(Debug)]
@@ -26,6 +27,7 @@ pub const REASONS: &[&str] = &[
 	"Server does not have permission to access that file",
 	"Unknown error when trying to access file",
 	"File has invalid content",
+	"Unable to deserialize settings",
 ];
 
 fn error_response(result: Error) -> SafeHttpResponse {
@@ -83,7 +85,7 @@ enum Command {
 
 	WriteDefaultConfig {
 		tx: oneshot::Sender<SafeHttpResponse>,
-		json: String,
+		settings: Settings,
 	},
 
 	WriteEdgeLogs {
@@ -157,19 +159,30 @@ impl FileManager {
 		}
 	}
 
-	async fn write_default_config(&mut self, json: String) -> SafeHttpResponse {
+	async fn write_default_config(&mut self, json: Settings) -> SafeHttpResponse {
 		let path = Path::new("./content/default_config.json");
+
 		let check_file = File::options()
 			.create(true)
 			.write(true)
 			.truncate(true)
 			.open(path);
+
 		if check_file.is_err() {
 			return error_response(check_file.err().unwrap());
 		}
 		let mut file = check_file.unwrap();
 
-		let _result = write!(&mut file, "{json}");
+		let Ok(write_settings) = serde_json::to_string(&json) else{
+			return SafeHttpResponse {
+				code: StatusCode::INTERNAL_SERVER_ERROR,
+				json: false,
+				body: None,
+				reason: Some(REASONS[4]),
+			};
+		};
+
+		let _result = write!(&mut file, "{write_settings}");
 
 		SafeHttpResponse {
 			code: StatusCode::OK,
@@ -210,8 +223,8 @@ impl FileManager {
 					let _ = tx.send(response);
 				},
 
-				Command::WriteDefaultConfig { tx, json } => {
-					let response = self.write_default_config(json).await;
+				Command::WriteDefaultConfig { tx, settings } => {
+					let response = self.write_default_config(settings).await;
 					let _ = tx.send(response);
 				},
 
@@ -241,12 +254,12 @@ impl FileManagerHandle {
 
 	pub async fn change_default_config(
 		&self,
-		json: String,
+		settings: Settings,
 	) -> SafeHttpResponse {
 		let (tx, rx) = oneshot::channel();
 
 		self.cmd_tx
-			.send(Command::WriteDefaultConfig { tx, json })
+			.send(Command::WriteDefaultConfig { tx, settings })
 			.unwrap();
 
 		rx.await.unwrap()
