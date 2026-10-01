@@ -10,6 +10,7 @@ use actix_web::{
 	HttpResponse,
 	http::{StatusCode, header::ContentType},
 };
+use server_edge_datatypes as datatypes;
 use tokio::sync::{mpsc, oneshot};
 
 #[derive(Debug)]
@@ -103,14 +104,40 @@ impl FileManager {
 	}
 
 	async fn get_default_config(&mut self) -> SafeHttpResponse {
-		let path = Path::new("./src/content/default_config.json");
+		let path = Path::new("./content/default_config.json");
 		let check_file = File::options().read(true).open(path);
-		if check_file.is_err() {
-			return error_response(check_file.err().unwrap());
-		}
 
-		let mut file = check_file.unwrap();
 		let mut body: String = String::new();
+		let Ok(mut file) = check_file else {
+			let err = check_file.unwrap_err();
+			return match err.kind() {
+				io::ErrorKind::NotFound => {
+					let check_init_file =
+						File::options().write(true).create(true).open(path);
+					if check_init_file.is_err() {
+						return error_response(check_init_file.err().unwrap());
+					}
+					let mut init_file = check_init_file.unwrap();
+					let default_default_config = serde_json::to_string(
+						&datatypes::edge::Settings::default(),
+					)
+					.expect("default settings struct could not be serialized");
+					write!(init_file, "{}", default_default_config).unwrap();
+					init_file
+						.flush()
+						.expect("Could not write to file due to IO error");
+					SafeHttpResponse {
+						code: StatusCode::OK,
+						json: true,
+						body: Some(default_default_config),
+						reason: None,
+					}
+				},
+
+				_ => error_response(err),
+			};
+		};
+
 		let result = file.read_to_string(&mut body);
 
 		if result.is_err() {
@@ -131,7 +158,7 @@ impl FileManager {
 	}
 
 	async fn write_default_config(&mut self, json: String) -> SafeHttpResponse {
-		let path = Path::new("./src/content/default_config.json");
+		let path = Path::new("./content/default_config.json");
 		let check_file = File::options()
 			.create(true)
 			.write(true)
@@ -156,7 +183,7 @@ impl FileManager {
 		&mut self,
 		logs: HashSet<String>,
 	) -> SafeHttpResponse {
-		let path = Path::new("./src/content/edge.log");
+		let path = Path::new("./content/edge.log");
 		let check_file = File::options().append(true).create(true).open(path);
 		if check_file.is_err() {
 			return error_response(check_file.err().unwrap());
