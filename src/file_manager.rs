@@ -30,6 +30,9 @@ pub const REASONS: &[&str] = &[
 	"Unable to deserialize settings",
 ];
 
+const DEFAULT_CONFIG: &str = "./content/default_config.json";
+const EDGE_LOGS: &str = "./content/edge.log";
+
 fn error_response(result: Error) -> SafeHttpResponse {
 	match result.kind() {
 		ErrorKind::NotFound => SafeHttpResponse {
@@ -106,43 +109,35 @@ impl FileManager {
 	}
 
 	async fn init_default_config(&mut self) -> SafeHttpResponse {
-		let path = Path::new("./content/default_config.json");
-		let check_file = File::options().write(true).truncate(true).create(true).open(path);
-		if check_file.is_err() {
-			return error_response(check_file.err().unwrap());
+
+		let result = self.write_default_config(Settings::default()).await;
+
+		if result.code != StatusCode::OK {
+			return result;
 		}
-		let mut file = check_file.unwrap();
-		let default_default_config = serde_json::to_string(&Settings::default())
-			.expect("default settings struct could not be serialized");
 
-		write!(file, "{}", default_default_config).unwrap();
-
-		file
-			.flush()
-			.expect("Could not write to file due to IO error");
+		let config = serde_json::to_string(&Settings::default()).unwrap();
 
 		SafeHttpResponse {
 			code: StatusCode::OK,
 			json: true,
-			body: Some(default_default_config),
+			body: Some(config),
 			reason: None,
 		}
 	}
 
 	async fn get_default_config(&mut self) -> SafeHttpResponse {
-		let path = Path::new("./content/default_config.json");
+		let path = Path::new(DEFAULT_CONFIG);
 		let check_file = File::options().read(true).open(path);
 
 		let mut body: String = String::new();
-		let Ok(mut file) = check_file else {
-			let err = check_file.unwrap_err();
-			return match err.kind() {
-				ErrorKind::NotFound => {
-					return self.init_default_config().await;
-				},
+		let mut file = match check_file {
+			Err(reason) if reason.kind() == ErrorKind::NotFound =>
+				return self.init_default_config().await,
 
-				_ => error_response(err),
-			};
+			Err(reason) => return error_response(reason),
+
+			Ok(file) => file,
 		};
 
 		let result = file.read_to_string(&mut body);
@@ -169,7 +164,7 @@ impl FileManager {
 	}
 
 	async fn write_default_config(&mut self, json: Settings) -> SafeHttpResponse {
-		let path = Path::new("./content/default_config.json");
+		let path = Path::new(DEFAULT_CONFIG);
 
 		let check_file = File::options()
 			.create(true)
@@ -191,7 +186,7 @@ impl FileManager {
 			};
 		};
 
-		let _result = write!(&mut file, "{write_settings}");
+		let _ = write!(&mut file, "{write_settings}");
 
 		SafeHttpResponse {
 			code: StatusCode::OK,
@@ -205,7 +200,7 @@ impl FileManager {
 		&mut self,
 		logs: HashSet<String>,
 	) -> SafeHttpResponse {
-		let path = Path::new("./content/edge.log");
+		let path = Path::new(EDGE_LOGS);
 		let check_file = File::options().append(true).create(true).open(path);
 		if check_file.is_err() {
 			return error_response(check_file.err().unwrap());
