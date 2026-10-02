@@ -2,6 +2,7 @@ mod file_manager;
 mod handler;
 mod restful;
 mod server;
+mod server_persist_data;
 
 use std::io;
 
@@ -60,9 +61,10 @@ async fn edge_ws(
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> io::Result<()> {
-	let (server, server_tx) = Server::new();
-	let (file_manager, file_manager_tx) = FileManager::new();
 
+	let (file_manager, file_manager_tx) = FileManager::new();
+	let (server, server_tx) = Server::new(file_manager_tx.clone());
+	
 	let file_manager = spawn(file_manager.run());
 	let server = spawn(server.run());
 

@@ -11,6 +11,7 @@ use actix_web::{
 	http::{StatusCode, header::ContentType},
 };
 use tokio::sync::{mpsc, oneshot};
+use crate::server_persist_data::PersistentServerData;
 
 #[derive(Debug)]
 pub struct SafeHttpResponse {
@@ -88,6 +89,10 @@ enum Command {
 	WriteEdgeLogs {
 		tx: oneshot::Sender<SafeHttpResponse>,
 		logs: HashSet<String>,
+	},
+
+	SaveServerState {
+		state: PersistentServerData,
 	},
 }
 
@@ -175,6 +180,27 @@ impl FileManager {
 		}
 	}
 
+	async fn save_server_state(&mut self, state: PersistentServerData) {
+		let path = Path::new("./content/server_state.json");
+		let check_file = File::options()
+			.create(true)
+			.write(true)
+			.truncate(true)
+			.open(path);
+		if check_file.is_err() {
+			eprintln!{"Could not open server_state.json due to: {:?}", check_file.err().unwrap()};
+			return;
+		}
+
+		let mut file = check_file.unwrap();
+		let json = serde_json::to_string(&state).unwrap();
+		let result = writeln!(&mut file, "{json}");
+		if result.is_err() {
+			eprintln!{"Could not write to server_state.json due to: {:?}", result.err().unwrap()};
+		}
+		return;
+	}
+
 	pub async fn run(mut self) -> io::Result<()> {
 		while let Some(cmd) = self.cmd_rx.recv().await {
 			match cmd {
@@ -192,6 +218,10 @@ impl FileManager {
 					let response = self.write_edge_logs(logs).await;
 					let _ = tx.send(response);
 				},
+
+				Command::SaveServerState {state} => {
+					self.save_server_state(state).await;
+				}
 			}
 		}
 		Ok(())
@@ -236,5 +266,9 @@ impl FileManagerHandle {
 			.unwrap();
 
 		rx.await.unwrap()
+	}
+
+	pub async fn save_server_state(&self, state: PersistentServerData) {
+		self.cmd_tx.send(Command::SaveServerState { state }).unwrap();
 	}
 }

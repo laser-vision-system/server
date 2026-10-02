@@ -2,21 +2,24 @@ use std::{
 	collections::{HashMap, HashSet},
 	io,
 };
-
+use std::time::Duration;
 use actix_web::web::Bytes;
 use datatypes::{
 	gui::CameraDetails,
 	shared::{CameraId, ConnId},
 };
 use rand::{self, RngExt as _};
+use serde::{Deserialize, Serialize};
 use server_edge_datatypes as datatypes;
 use server_edge_datatypes::edge::EdgeRequests;
 use server_edge_datatypes::gui::GUIRequests;
 use server_edge_datatypes::shared::{CameraStatus, Deviation};
 use tokio::sync::{mpsc, mpsc::UnboundedSender, oneshot};
-
+use tokio::time::interval;
 use crate::WSSide::Edge;
 use crate::{Msg, WSSide};
+use crate::file_manager::{FileManager, FileManagerHandle};
+use crate::server_persist_data::{PersistentServerData, ShortCameraDetails};
 
 #[derive(Debug)]
 enum Command {
@@ -137,8 +140,8 @@ enum Command {
 	},
 }
 
-#[derive(Hash, Debug, Clone, Copy, Eq, PartialEq)]
-struct UniqueCameraID {
+#[derive(Hash, Debug, Clone, Copy, Eq, PartialEq, Serialize, Deserialize)]
+pub(crate) struct UniqueCameraID {
 	conn: ConnId,
 	camera: CameraId,
 }
@@ -173,10 +176,12 @@ pub struct Server {
 	default_alert_above_threshold: Deviation,
 
 	cmd_rx: mpsc::UnboundedReceiver<Command>,
+
+	file_manager: FileManagerHandle
 }
 
 impl Server {
-	pub fn new() -> (Self, ServerHandle) {
+	pub fn new(file_manager: FileManagerHandle) -> (Self, ServerHandle) {
 		let (tx, rx) = mpsc::unbounded_channel();
 		(
 			Self {
@@ -191,6 +196,7 @@ impl Server {
 				default_warn_above_threshold: 1.1,
 				default_alert_above_threshold: 1.2,
 				cmd_rx: rx,
+				file_manager,
 			},
 			ServerHandle { cmd_tx: tx },
 		)
@@ -868,118 +874,150 @@ impl Server {
 		}
 	}
 
+	async fn get_persist_data(&mut self) -> PersistentServerData {
+		let mut cameras: HashMap<UniqueCameraID, ShortCameraDetails> = HashMap::new();
+		for camera in self.cameras.clone() {
+ 			cameras.insert(camera.0, ShortCameraDetails::from(camera.1));
+		}
+
+		PersistentServerData {
+			edge_names: self.edge_names.clone(),
+			cameras,
+			default_alert_threshold: self.default_alert_threshold,
+			default_alert_above_threshold: self.default_alert_above_threshold,
+			default_warn_above_threshold: self.default_warn_above_threshold,
+			default_warn_threshold: self.default_warn_threshold,
+		}
+	}
+
+	async fn save_persist_data(&mut self, data: PersistentServerData) {
+		
+	}
+
 	pub async fn run(mut self) -> io::Result<()> {
-		while let Some(cmd) = self.cmd_rx.recv().await {
-			match cmd {
-				Command::Connect {
-					conn_tx,
-					res_tx,
-					conn_id,
-					side,
-					img_tx,
-				} => {
-					let success = self.connect(conn_tx, img_tx, conn_id, side).await;
-					let _ = res_tx.send(success);
-				},
-
-				Command::Disconnect { conn, side } => {
-					self.disconnect(conn, side).await;
-				},
-
-				Command::RegisterCameras { conn, cameras } => {
-					self.register_cameras(conn, cameras).await;
-				},
-
-				Command::UpdateCameraStatus { conn, data } => {
-					self.update_camera_status(conn, data).await;
-				},
-
-				Command::ImageAnalysis { conn, analysis } => {
-					self.image_analysis(conn, analysis).await;
-				},
-
-				Command::Setpoint { target } => {
-					self.set_point(target).await;
-				},
-
-				Command::ListCameras { conn } => {
-					self.list_cameras(conn).await;
-				},
-
-				Command::SetNameCamera { conn, camera, name } => {
-					self.set_name_camera(conn, camera, name).await;
-				},
-
-				Command::StartViewingCamera {
-					gui_conn,
-					edge_conn,
-					camera,
-				} => {
-					self.start_viewing_camera(gui_conn, edge_conn, camera)
-						.await;
-				},
-
-				Command::StopViewingCamera { conn } => {
-					self.stop_viewing_camera(conn).await;
-				},
-
-				Command::Configuration { conn, config, side } => {
-					self.configuration(conn, config, side).await;
-				},
-
-				Command::ViewCameraConfig { conn, camera } => {
-					self.view_camera_config(conn, camera).await;
-				},
-
-				Command::ForgetCamera { conn, target, side } => {
-					self.forget_camera(conn, target, side).await;
-				},
-
-				Command::RouteImage { conn, bytes } => {
-					self.route_image(conn, bytes).await;
-				},
-
-				Command::SetCameraThresholds { data } => {
-					self.set_camera_thresholds(data).await;
-				},
-
-				Command::SetDefaultThresholds { data } => {
-					self.set_default_thresholds(data).await;
-				},
-
-				Command::SetEdgeProcessingType { data } => {
-					self.set_edge_processing(data).await;
-				},
-
-				Command::GetDefaultThresholds { conn } => {
-					self.get_default_thresholds(conn).await;
-				},
-
-				Command::ListEdges { conn } => {
-					self.list_edges(conn).await;
-				},
-
-				Command::SetEdgeName { data } => {
-					self.set_edge_name(data).await;
-				},
-
-				Command::AlertFromEdge { conn, data } => {
-					self.send_alert(Some(conn), data, None).await;
-				},
-
-				Command::AlertFromServer { data, target } => {
-					self.send_alert(None, data, target).await;
-				},
-
-				Command::ForceRetryCamera { data } => {
-					self.force_retry_camera(data).await;
-				},
-
-				Command::ListProcessingTypes { conn } => {
-					self.list_processing_types(conn).await;
-				},
+		let mut interval = interval(Duration::from_secs(15));
+		interval.tick().await;
+		loop {
+			tokio::select! {
+				Some(cmd) = self.cmd_rx.recv() => {
+					match cmd {
+						Command::Connect {
+							conn_tx,
+							res_tx,
+							conn_id,
+							side,
+							img_tx,
+						} => {
+							let success = self.connect(conn_tx, img_tx, conn_id, side).await;
+							let _ = res_tx.send(success);
+						},
+		
+						Command::Disconnect { conn, side } => {
+							self.disconnect(conn, side).await;
+						},
+		
+						Command::RegisterCameras { conn, cameras } => {
+							self.register_cameras(conn, cameras).await;
+						},
+		
+						Command::UpdateCameraStatus { conn, data } => {
+							self.update_camera_status(conn, data).await;
+						},
+		
+						Command::ImageAnalysis { conn, analysis } => {
+							self.image_analysis(conn, analysis).await;
+						},
+		
+						Command::Setpoint { target } => {
+							self.set_point(target).await;
+						},
+		
+						Command::ListCameras { conn } => {
+							self.list_cameras(conn).await;
+						},
+		
+						Command::SetNameCamera { conn, camera, name } => {
+							self.set_name_camera(conn, camera, name).await;
+						},
+		
+						Command::StartViewingCamera {
+							gui_conn,
+							edge_conn,
+							camera,
+						} => {
+							self.start_viewing_camera(gui_conn, edge_conn, camera)
+								.await;
+						},
+		
+						Command::StopViewingCamera { conn } => {
+							self.stop_viewing_camera(conn).await;
+						},
+		
+						Command::Configuration { conn, config, side } => {
+							self.configuration(conn, config, side).await;
+						},
+		
+						Command::ViewCameraConfig { conn, camera } => {
+							self.view_camera_config(conn, camera).await;
+						},
+		
+						Command::ForgetCamera { conn, target, side } => {
+							self.forget_camera(conn, target, side).await;
+						},
+		
+						Command::RouteImage { conn, bytes } => {
+							self.route_image(conn, bytes).await;
+						},
+		
+						Command::SetCameraThresholds { data } => {
+							self.set_camera_thresholds(data).await;
+						},
+		
+						Command::SetDefaultThresholds { data } => {
+							self.set_default_thresholds(data).await;
+						},
+		
+						Command::SetEdgeProcessingType { data } => {
+							self.set_edge_processing(data).await;
+						},
+		
+						Command::GetDefaultThresholds { conn } => {
+							self.get_default_thresholds(conn).await;
+						},
+		
+						Command::ListEdges { conn } => {
+							self.list_edges(conn).await;
+						},
+		
+						Command::SetEdgeName { data } => {
+							self.set_edge_name(data).await;
+						},
+		
+						Command::AlertFromEdge { conn, data } => {
+							self.send_alert(Some(conn), data, None).await;
+						},
+		
+						Command::AlertFromServer { data, target } => {
+							self.send_alert(None, data, target).await;
+						},
+		
+						Command::ForceRetryCamera { data } => {
+							self.force_retry_camera(data).await;
+						},
+		
+						Command::ListProcessingTypes { conn } => {
+							self.list_processing_types(conn).await;
+						},
+					}
+				}
+				
+				_ = interval.tick() => {
+					let save_data = self.get_persist_data().await;
+					self.file_manager.save_server_state(save_data).await;
+				}
 			}
 		}
+
 		Ok(())
 	}
 }
