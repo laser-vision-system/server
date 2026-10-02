@@ -94,6 +94,10 @@ enum Command {
 	SaveServerState {
 		state: PersistentServerData,
 	},
+
+	LoadServerState {
+		tx: oneshot::Sender<PersistentServerData>,
+	}
 }
 
 #[derive(Debug)]
@@ -201,6 +205,24 @@ impl FileManager {
 		return;
 	}
 
+	async fn load_server_state(&mut self) -> PersistentServerData {
+		let path = Path::new("./content/server_state.json");
+		let check_file = File::options().read(true).open(path);
+		if check_file.is_err() {
+			eprintln!{"Could not open server_state.json due to: {:?}", check_file.err().unwrap()};
+			return PersistentServerData::default()
+		}
+		let mut file = check_file.unwrap();
+		let mut body: String = String::new();
+		let result = file.read_to_string(&mut body);
+
+		if result.is_err() {
+			eprintln!("Could not read server_state.json due to: {:?}", result.err().unwrap());
+			return PersistentServerData::default()
+		}
+		return serde_json::from_str::<PersistentServerData>(&body).unwrap();
+	}
+
 	pub async fn run(mut self) -> io::Result<()> {
 		while let Some(cmd) = self.cmd_rx.recv().await {
 			match cmd {
@@ -221,6 +243,12 @@ impl FileManager {
 
 				Command::SaveServerState {state} => {
 					self.save_server_state(state).await;
+				}
+
+				Command::LoadServerState { tx } => {
+					let result = self.load_server_state().await;
+
+					let _ = tx.send(result);
 				}
 			}
 		}
@@ -270,5 +298,13 @@ impl FileManagerHandle {
 
 	pub async fn save_server_state(&self, state: PersistentServerData) {
 		self.cmd_tx.send(Command::SaveServerState { state }).unwrap();
+	}
+
+	pub async fn load_server_state(&self) -> PersistentServerData {
+		let (tx, rx) = oneshot::channel();
+
+		self.cmd_tx.send(Command::LoadServerState { tx }).unwrap();
+
+		rx.await.unwrap()
 	}
 }

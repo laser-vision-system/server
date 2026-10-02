@@ -24,6 +24,19 @@ impl From<CameraDetails> for ShortCameraDetails {
     }
 }
 
+impl From<ShortCameraDetails> for CameraDetails {
+    fn from(details: ShortCameraDetails) -> Self {
+        CameraDetails {
+            name: details.name,
+            state: CameraStatus::Disconnected,
+            warn_below_threshold: details.warn_below_threshold,
+            alert_below_threshold: details.alert_below_threshold,
+            warn_above_threshold: details.warn_above_threshold,
+            alert_above_threshold: details.alert_above_threshold,
+        }
+    }
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct PersistentServerData {
     pub edge_names: HashMap<ConnId, String>,
@@ -37,4 +50,17 @@ pub struct PersistentServerData {
     pub default_warn_above_threshold: Deviation,
 
     pub default_alert_above_threshold: Deviation,
+}
+
+impl Default for PersistentServerData {
+    fn default() -> Self {
+        PersistentServerData {
+            edge_names: HashMap::new(),
+            cameras: HashMap::new(),
+            default_warn_threshold: 0.9,
+            default_alert_threshold: 0.8,
+            default_warn_above_threshold: 1.1,
+            default_alert_above_threshold: 1.2,
+        }
+    }
 }

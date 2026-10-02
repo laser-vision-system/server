@@ -181,20 +181,28 @@ pub struct Server {
 }
 
 impl Server {
-	pub fn new(file_manager: FileManagerHandle) -> (Self, ServerHandle) {
+	pub async fn new(file_manager: FileManagerHandle) -> (Self, ServerHandle) {
 		let (tx, rx) = mpsc::unbounded_channel();
+		
+		let loaded_state = file_manager.load_server_state().await;
+		
+		let mut cameras: HashMap<UniqueCameraID, CameraDetails> = HashMap::new();
+		for camera in loaded_state.cameras {
+			cameras.insert(camera.0, CameraDetails::from(camera.1));
+		}
+		
 		(
 			Self {
 				gui_sessions: HashMap::new(),
 				gui_img_route: HashMap::new(),
 				edge_sessions: HashMap::new(),
-				edge_names: HashMap::new(),
-				cameras: HashMap::new(),
+				edge_names: loaded_state.edge_names,
+				cameras,
 				video_routes: HashMap::new(),
-				default_warn_threshold: 0.9,
-				default_alert_threshold: 0.8,
-				default_warn_above_threshold: 1.1,
-				default_alert_above_threshold: 1.2,
+				default_warn_threshold: loaded_state.default_warn_threshold,
+				default_alert_threshold: loaded_state.default_alert_threshold,
+				default_warn_above_threshold: loaded_state.default_warn_above_threshold,
+				default_alert_above_threshold: loaded_state.default_alert_above_threshold,
 				cmd_rx: rx,
 				file_manager,
 			},
