@@ -33,6 +33,7 @@ pub const REASONS: &[&str] = &[
 
 const DEFAULT_CONFIG: &str = "./content/default_config.json";
 const EDGE_LOGS: &str = "./content/edge.log";
+const SERVER_STATE: &str =  "./content/server_state.json";
 
 fn error_response(result: Error) -> SafeHttpResponse {
 	match result.kind() {
@@ -229,7 +230,7 @@ impl FileManager {
 	}
 
 	async fn save_server_state(&mut self, state: PersistentServerData) {
-		let path = Path::new("./content/server_state.json");
+		let path = Path::new(SERVER_STATE);
 		let check_file = File::options()
 			.create(true)
 			.write(true)
@@ -250,7 +251,7 @@ impl FileManager {
 	}
 
 	async fn load_server_state(&mut self) -> PersistentServerData {
-		let path = Path::new("./content/server_state.json");
+		let path = Path::new(SERVER_STATE);
 		let check_file = File::options().read(true).open(path);
 		if check_file.is_err() {
 			eprintln!{"Could not open server_state.json due to: {:?}", check_file.err().unwrap()};
