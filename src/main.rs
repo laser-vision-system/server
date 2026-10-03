@@ -63,9 +63,11 @@ async fn edge_ws(
 async fn main() -> io::Result<()> {
 
 	let (file_manager, file_manager_tx) = FileManager::new();
-	let (server, server_tx) = Server::new(file_manager_tx.clone()).await;
-	
+
 	let file_manager = spawn(file_manager.run());
+
+	let (server, server_tx) = Server::new(file_manager_tx.clone()).await;
+
 	let server = spawn(server.run());
 
 	let http_server = HttpServer::new(move || {

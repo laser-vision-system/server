@@ -253,10 +253,12 @@ impl FileManager {
 	async fn load_server_state(&mut self) -> PersistentServerData {
 		let path = Path::new(SERVER_STATE);
 		let check_file = File::options().read(true).open(path);
+
 		if check_file.is_err() {
 			eprintln!{"Could not open server_state.json due to: {:?}", check_file.err().unwrap()};
 			return PersistentServerData::default()
 		}
+
 		let mut file = check_file.unwrap();
 		let mut body: String = String::new();
 		let result = file.read_to_string(&mut body);
@@ -265,6 +267,7 @@ impl FileManager {
 			eprintln!("Could not read server_state.json due to: {:?}", result.err().unwrap());
 			return PersistentServerData::default()
 		}
+
 		return serde_json::from_str::<PersistentServerData>(&body).unwrap();
 	}
 
