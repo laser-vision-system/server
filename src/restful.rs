@@ -24,7 +24,7 @@ async fn write_default_config(
 	file_manager: web::Data<FileManagerHandle>,
 	json: web::Json<datatypes::restful::Config>,
 ) -> impl Responder {
-	let response = file_manager.change_default_config(json.json.clone()).await;
+	let response = file_manager.change_default_config(json.settings.clone()).await;
 	fill_response(response)
 }
 

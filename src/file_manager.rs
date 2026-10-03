@@ -10,6 +10,8 @@ use actix_web::{
 	HttpResponse,
 	http::{StatusCode, header::ContentType},
 };
+use server_edge_datatypes as datatypes;
+use server_edge_datatypes::edge::Settings;
 use tokio::sync::{mpsc, oneshot};
 use crate::server_persist_data::PersistentServerData;
 
@@ -26,7 +28,11 @@ pub const REASONS: &[&str] = &[
 	"Server does not have permission to access that file",
 	"Unknown error when trying to access file",
 	"File has invalid content",
+	"Unable to deserialize settings",
 ];
+
+const DEFAULT_CONFIG: &str = "./content/default_config.json";
+const EDGE_LOGS: &str = "./content/edge.log";
 
 fn error_response(result: Error) -> SafeHttpResponse {
 	match result.kind() {
@@ -83,7 +89,7 @@ enum Command {
 
 	WriteDefaultConfig {
 		tx: oneshot::Sender<SafeHttpResponse>,
-		json: String,
+		settings: Settings,
 	},
 
 	WriteEdgeLogs {
@@ -111,16 +117,43 @@ impl FileManager {
 		(Self { cmd_rx: rx }, FileManagerHandle { cmd_tx: tx })
 	}
 
-	async fn get_default_config(&mut self) -> SafeHttpResponse {
-		let path = Path::new("./src/content/default_config.json");
-		let check_file = File::options().read(true).open(path);
-		if check_file.is_err() {
-			return error_response(check_file.err().unwrap());
+	async fn init_default_config(&mut self) -> SafeHttpResponse {
+
+		let result = self.write_default_config(Settings::default()).await;
+
+		if result.code != StatusCode::OK {
+			return result;
 		}
 
-		let mut file = check_file.unwrap();
+		let config = serde_json::to_string(&Settings::default()).unwrap();
+
+		SafeHttpResponse {
+			code: StatusCode::OK,
+			json: true,
+			body: Some(config),
+			reason: None,
+		}
+	}
+
+	async fn get_default_config(&mut self) -> SafeHttpResponse {
+		let path = Path::new(DEFAULT_CONFIG);
+		let check_file = File::options().read(true).open(path);
+
 		let mut body: String = String::new();
+		let mut file = match check_file {
+			Err(reason) if reason.kind() == ErrorKind::NotFound =>
+				return self.init_default_config().await,
+
+			Err(reason) => return error_response(reason),
+
+			Ok(file) => file,
+		};
+
 		let result = file.read_to_string(&mut body);
+
+		if serde_json::from_str::<Settings>(body.as_str()).is_err() {
+			return self.init_default_config().await;
+		}
 
 		if result.is_err() {
 			return SafeHttpResponse {
@@ -139,19 +172,30 @@ impl FileManager {
 		}
 	}
 
-	async fn write_default_config(&mut self, json: String) -> SafeHttpResponse {
-		let path = Path::new("./src/content/default_config.json");
+	async fn write_default_config(&mut self, json: Settings) -> SafeHttpResponse {
+		let path = Path::new(DEFAULT_CONFIG);
+
 		let check_file = File::options()
 			.create(true)
 			.write(true)
 			.truncate(true)
 			.open(path);
+
 		if check_file.is_err() {
 			return error_response(check_file.err().unwrap());
 		}
 		let mut file = check_file.unwrap();
 
-		let _result = write!(&mut file, "{json}");
+		let Ok(write_settings) = serde_json::to_string(&json) else{
+			return SafeHttpResponse {
+				code: StatusCode::INTERNAL_SERVER_ERROR,
+				json: false,
+				body: None,
+				reason: Some(REASONS[4]),
+			};
+		};
+
+		let _ = write!(&mut file, "{write_settings}");
 
 		SafeHttpResponse {
 			code: StatusCode::OK,
@@ -165,7 +209,7 @@ impl FileManager {
 		&mut self,
 		logs: HashSet<String>,
 	) -> SafeHttpResponse {
-		let path = Path::new("./src/content/edge.log");
+		let path = Path::new(EDGE_LOGS);
 		let check_file = File::options().append(true).create(true).open(path);
 		if check_file.is_err() {
 			return error_response(check_file.err().unwrap());
@@ -231,8 +275,8 @@ impl FileManager {
 					let _ = tx.send(response);
 				},
 
-				Command::WriteDefaultConfig { tx, json } => {
-					let response = self.write_default_config(json).await;
+				Command::WriteDefaultConfig { tx, settings } => {
+					let response = self.write_default_config(settings).await;
 					let _ = tx.send(response);
 				},
 
@@ -272,12 +316,12 @@ impl FileManagerHandle {
 
 	pub async fn change_default_config(
 		&self,
-		json: String,
+		settings: Settings,
 	) -> SafeHttpResponse {
 		let (tx, rx) = oneshot::channel();
 
 		self.cmd_tx
-			.send(Command::WriteDefaultConfig { tx, json })
+			.send(Command::WriteDefaultConfig { tx, settings })
 			.unwrap();
 
 		rx.await.unwrap()
