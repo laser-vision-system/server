@@ -59,6 +59,14 @@ enum Command {
 		conn: ConnId,
 	},
 
+	ListDisconnectedEdges {
+		conn: ConnId,
+	},
+
+	ForgetEdge {
+		data: datatypes::gui::ForgetEdge,
+	},
+
 	SetNameCamera {
 		conn: ConnId,
 		camera: CameraId,
@@ -806,7 +814,16 @@ impl Server {
 	async fn list_edges(&mut self, conn_id: ConnId) {
 		let mut edge_names_copy = HashMap::new();
 
+		let mut active_edges = HashSet::new();
+
+		for conn in self.edge_sessions.keys() {
+			active_edges.insert(conn);
+		}
+
 		for edge in self.edge_names.clone() {
+			if !active_edges.contains(&edge.0) {
+				continue;
+			}
 			edge_names_copy.insert(edge.0.to_string(), edge.1);
 		}
 
@@ -819,6 +836,47 @@ impl Server {
 		let target = self.gui_sessions.get(&conn_id);
 		if let Some(target) = target {
 			target.send(send.clone()).unwrap();
+		}
+	}
+
+	async fn disconnected_edges(&mut self, conn_id: ConnId) {
+		let mut edge_names_copy = HashMap::new();
+
+		let mut active_edges = HashSet::new();
+
+		for conn in self.edge_sessions.keys() {
+			active_edges.insert(conn);
+		}
+
+		for edge in self.edge_names.clone() {
+			if active_edges.contains(&edge.0) {
+				continue;
+			}
+			edge_names_copy.insert(edge.0.to_string(), edge.1);
+		}
+
+		let data = datatypes::gui::DisconnectedEdges {
+			edges: edge_names_copy,
+		};
+		let msg = GUIRequests::DisconnectedEdges(data);
+		let send = &serde_json::to_string(&msg).unwrap();
+
+		let target = self.gui_sessions.get(&conn_id);
+		if let Some(target) = target {
+			target.send(send.clone()).unwrap();
+		}
+	}
+
+	async fn forget_edge(&mut self, data: datatypes::gui::ForgetEdge) {
+		if self.edge_sessions.contains_key(&data.conn) {
+			return;
+		}
+
+		self.edge_names.remove(&data.conn);
+
+		for gui in self.gui_sessions.clone().keys() {
+			self.list_edges(*gui).await;
+			self.disconnected_edges(*gui).await;
 		}
 	}
 
@@ -996,6 +1054,14 @@ impl Server {
 						Command::ListEdges { conn } => {
 							self.list_edges(conn).await;
 						},
+
+						Command::ListDisconnectedEdges { conn } => {
+							self.disconnected_edges(conn).await;
+						}
+
+						Command::ForgetEdge { data } => {
+							self.forget_edge(data).await;
+						}
 		
 						Command::SetEdgeName { data } => {
 							self.set_edge_name(data).await;
@@ -1213,6 +1279,14 @@ impl ServerHandle {
 
 	pub async fn list_edges(&self, conn: ConnId) {
 		self.cmd_tx.send(Command::ListEdges { conn }).unwrap();
+	}
+
+	pub async fn list_disconnected_edges(&self, conn: ConnId) {
+		self.cmd_tx.send(Command::ListDisconnectedEdges { conn }).unwrap();
+	}
+
+	pub async fn forget_edge(&self, data: datatypes::gui::ForgetEdge) {
+		self.cmd_tx.send(Command::ForgetEdge { data }).unwrap();
 	}
 
 	pub async fn set_edge_name(&self, data: datatypes::gui::SetEdgeName) {
