@@ -13,6 +13,7 @@ use actix_web::{
 use server_edge_datatypes as datatypes;
 use server_edge_datatypes::edge::Settings;
 use tokio::sync::{mpsc, oneshot};
+use crate::server_persist_data::PersistentServerData;
 
 #[derive(Debug)]
 pub struct SafeHttpResponse {
@@ -32,6 +33,7 @@ pub const REASONS: &[&str] = &[
 
 const DEFAULT_CONFIG: &str = "./content/default_config.json";
 const EDGE_LOGS: &str = "./content/edge.log";
+const SERVER_STATE: &str =  "./content/server_state.json";
 
 fn error_response(result: Error) -> SafeHttpResponse {
 	match result.kind() {
@@ -95,6 +97,14 @@ enum Command {
 		tx: oneshot::Sender<SafeHttpResponse>,
 		logs: HashSet<String>,
 	},
+
+	SaveServerState {
+		state: PersistentServerData,
+	},
+
+	LoadServerState {
+		tx: oneshot::Sender<PersistentServerData>,
+	}
 }
 
 #[derive(Debug)]
@@ -219,6 +229,48 @@ impl FileManager {
 		}
 	}
 
+	async fn save_server_state(&mut self, state: PersistentServerData) {
+		let path = Path::new(SERVER_STATE);
+		let check_file = File::options()
+			.create(true)
+			.write(true)
+			.truncate(true)
+			.open(path);
+		if check_file.is_err() {
+			eprintln!{"Could not open server_state.json due to: {:?}", check_file.err().unwrap()};
+			return;
+		}
+
+		let mut file = check_file.unwrap();
+		let json = serde_json::to_string(&state).unwrap();
+		let result = writeln!(&mut file, "{json}");
+		if result.is_err() {
+			eprintln!{"Could not write to server_state.json due to: {:?}", result.err().unwrap()};
+		}
+		return;
+	}
+
+	async fn load_server_state(&mut self) -> PersistentServerData {
+		let path = Path::new(SERVER_STATE);
+		let check_file = File::options().read(true).open(path);
+
+		if check_file.is_err() {
+			eprintln!{"Could not open server_state.json due to: {:?}", check_file.err().unwrap()};
+			return PersistentServerData::default()
+		}
+
+		let mut file = check_file.unwrap();
+		let mut body: String = String::new();
+		let result = file.read_to_string(&mut body);
+
+		if result.is_err() {
+			eprintln!("Could not read server_state.json due to: {:?}", result.err().unwrap());
+			return PersistentServerData::default()
+		}
+
+		return serde_json::from_str::<PersistentServerData>(&body).unwrap();
+	}
+
 	pub async fn run(mut self) -> io::Result<()> {
 		while let Some(cmd) = self.cmd_rx.recv().await {
 			match cmd {
@@ -236,6 +288,16 @@ impl FileManager {
 					let response = self.write_edge_logs(logs).await;
 					let _ = tx.send(response);
 				},
+
+				Command::SaveServerState {state} => {
+					self.save_server_state(state).await;
+				}
+
+				Command::LoadServerState { tx } => {
+					let result = self.load_server_state().await;
+
+					let _ = tx.send(result);
+				}
 			}
 		}
 		Ok(())
@@ -278,6 +340,18 @@ impl FileManagerHandle {
 		self.cmd_tx
 			.send(Command::WriteEdgeLogs { tx, logs })
 			.unwrap();
+
+		rx.await.unwrap()
+	}
+
+	pub async fn save_server_state(&self, state: PersistentServerData) {
+		self.cmd_tx.send(Command::SaveServerState { state }).unwrap();
+	}
+
+	pub async fn load_server_state(&self) -> PersistentServerData {
+		let (tx, rx) = oneshot::channel();
+
+		self.cmd_tx.send(Command::LoadServerState { tx }).unwrap();
 
 		rx.await.unwrap()
 	}
