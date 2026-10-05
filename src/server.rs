@@ -142,8 +142,14 @@ enum Command {
 
 #[derive(Hash, Debug, Clone, Copy, Eq, PartialEq, Serialize, Deserialize)]
 pub(crate) struct UniqueCameraID {
-	conn: ConnId,
-	camera: CameraId,
+	pub conn: ConnId,
+	pub camera: CameraId,
+}
+
+impl From<String> for UniqueCameraID {
+	fn from(id: String) -> Self {
+		serde_json::from_str(&*id).unwrap()
+	}
 }
 
 impl From<UniqueCameraID> for (ConnId, CameraId) {
@@ -188,7 +194,7 @@ impl Server {
 		
 		let mut cameras: HashMap<UniqueCameraID, CameraDetails> = HashMap::new();
 		for camera in loaded_state.cameras {
-			cameras.insert(camera.0, CameraDetails::from(camera.1));
+			cameras.insert(UniqueCameraID::from(camera.0), CameraDetails::from(camera.1));
 		}
 		
 		(
@@ -376,7 +382,11 @@ impl Server {
 			new_details,
 		);
 		match data.status {
-			CameraStatus::Active => {},
+			CameraStatus::Active => {
+				for gui in self.gui_sessions.clone().keys() {
+					self.list_cameras(*gui).await;
+				}
+			},
 
 			_ => self.disconnect_camera(conn, data.camera_id).await,
 		}
@@ -883,9 +893,9 @@ impl Server {
 	}
 
 	async fn get_persist_data(&mut self) -> PersistentServerData {
-		let mut cameras: HashMap<UniqueCameraID, ShortCameraDetails> = HashMap::new();
+		let mut cameras: HashMap<String, ShortCameraDetails> = HashMap::new();
 		for camera in self.cameras.clone() {
- 			cameras.insert(camera.0, ShortCameraDetails::from(camera.1));
+ 			cameras.insert(String::from(camera.0), ShortCameraDetails::from(camera.1));
 		}
 
 		PersistentServerData {
