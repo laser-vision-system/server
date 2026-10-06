@@ -116,11 +116,12 @@ pub struct FileManager {
 
 impl FileManager {
 	pub fn new() -> (Self, FileManagerHandle) {
+		Self::assert_content_folder();
 		let (tx, rx) = mpsc::unbounded_channel();
 		(Self { cmd_rx: rx }, FileManagerHandle { cmd_tx: tx })
 	}
-
-	async fn assert_content_folder(&mut self) {
+	
+	fn assert_content_folder() {
 		let result = std::fs::create_dir_all(Path::new(CONTENT_FOLDER));
 		if result.is_ok() {
 			return
