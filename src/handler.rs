@@ -239,6 +239,12 @@ async fn gui_process(server: &ServerHandle, text: &str, conn: ConnId) {
 
 		GUIServerRequests::ListCameras => server.list_cameras(conn).await,
 
+		GUIServerRequests::ListDisconnectedEdges => server.list_disconnected_edges(conn).await,
+
+		GUIServerRequests::ForgetEdge(data) => {
+			server.forget_edge(data).await
+		}
+
 		GUIServerRequests::ViewCameraConfig(data) => {
 			server.view_camera_config(conn, data).await
 		},
