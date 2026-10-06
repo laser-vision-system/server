@@ -146,6 +146,11 @@ enum Command {
 	ListProcessingTypes {
 		conn: ConnId,
 	},
+
+	EdgeCameraNameUpdate {
+		conn: ConnId,
+		data: datatypes::edge::SetNameCamera
+	}
 }
 
 #[derive(Hash, Debug, Clone, Copy, Eq, PartialEq, Serialize, Deserialize)]
@@ -496,6 +501,32 @@ impl Server {
 
 		let target = &self.edge_sessions[&conn_id];
 		target.send(send.clone()).unwrap();
+	}
+
+	async fn edge_camera_name_update(&mut self, conn_id: ConnId, data: datatypes::edge::SetNameCamera) {
+		let camera_id = UniqueCameraID {
+			conn: conn_id,
+			camera: data.camera_id,
+		};
+		if !self.cameras.contains_key(&camera_id) {
+			return;
+		}
+
+		let old_camera_data = self.cameras.get(&camera_id).unwrap();
+		let new_camera_data = CameraDetails {
+			name: data.name,
+			state: old_camera_data.state,
+			warn_below_threshold: old_camera_data.warn_below_threshold,
+			warn_above_threshold: old_camera_data.warn_above_threshold,
+			alert_above_threshold: old_camera_data.warn_below_threshold,
+			alert_below_threshold: old_camera_data.warn_below_threshold
+		};
+
+		self.cameras.insert(camera_id, new_camera_data);
+
+		for gui in self.gui_sessions.clone().keys() {
+			self.list_cameras(*gui).await;
+		}
 	}
 
 	async fn start_viewing_camera(
@@ -1005,6 +1036,10 @@ impl Server {
 						Command::SetNameCamera { conn, camera, name } => {
 							self.set_name_camera(conn, camera, name).await;
 						},
+
+						Command::EdgeCameraNameUpdate {conn, data} => {
+							self.edge_camera_name_update(conn, data).await;
+						}
 		
 						Command::StartViewingCamera {
 							gui_conn,
@@ -1176,6 +1211,10 @@ impl ServerHandle {
 				name: data.name,
 			})
 			.unwrap();
+	}
+
+	pub async fn edge_camera_name_update(&self, conn: ConnId, data: datatypes::edge::SetNameCamera) {
+		self.cmd_tx.send(Command::EdgeCameraNameUpdate { conn, data }).unwrap();
 	}
 
 	pub async fn start_viewing_camera(
