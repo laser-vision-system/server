@@ -345,6 +345,10 @@ async fn edge_process(server: &ServerHandle, text: &str, conn: ConnId,) {
 			server.alert_from_edge(conn, data).await
 		},
 
+		EdgeServerRequests::SetNameCamera(data) => {
+			server.edge_camera_name_update(conn, data).await
+		}
+
 		_ => {
 			eprintln!("Message not recognised");
 		},
