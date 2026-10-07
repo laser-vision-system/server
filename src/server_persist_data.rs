@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 use server_edge_datatypes::gui::CameraDetails;
 use server_edge_datatypes::shared::{CameraId, CameraStatus, ConnId, Deviation};
+use crate::server::UniqueCameraID;
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct ShortCameraDetails {
@@ -37,11 +38,17 @@ impl From<ShortCameraDetails> for CameraDetails {
     }
 }
 
+impl From<UniqueCameraID> for String {
+    fn from(id: UniqueCameraID) -> Self {
+        serde_json::to_string(&id).unwrap()
+    }
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct PersistentServerData {
     pub edge_names: HashMap<ConnId, String>,
 
-    pub cameras: HashMap<crate::server::UniqueCameraID, ShortCameraDetails>,
+    pub cameras: HashMap<String, ShortCameraDetails>,
 
     pub default_warn_threshold: Deviation,
 

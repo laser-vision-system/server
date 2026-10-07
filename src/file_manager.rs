@@ -31,6 +31,8 @@ pub const REASONS: &[&str] = &[
 	"Unable to deserialize settings",
 ];
 
+const CONTENT_FOLDER: &str = "content";
+
 const DEFAULT_CONFIG: &str = "./content/default_config.json";
 const EDGE_LOGS: &str = "./content/edge.log";
 const SERVER_STATE: &str =  "./content/server_state.json";
@@ -114,8 +116,18 @@ pub struct FileManager {
 
 impl FileManager {
 	pub fn new() -> (Self, FileManagerHandle) {
+		Self::assert_content_folder();
 		let (tx, rx) = mpsc::unbounded_channel();
 		(Self { cmd_rx: rx }, FileManagerHandle { cmd_tx: tx })
+	}
+	
+	fn assert_content_folder() {
+		let result = std::fs::create_dir_all(Path::new(CONTENT_FOLDER));
+		if result.is_ok() {
+			return
+		}
+		eprintln!("Could not create content folder!");
+		panic!();
 	}
 
 	async fn init_default_config(&mut self) -> SafeHttpResponse {
@@ -268,7 +280,14 @@ impl FileManager {
 			return PersistentServerData::default()
 		}
 
-		return serde_json::from_str::<PersistentServerData>(&body).unwrap();
+		let data = serde_json::from_str::<PersistentServerData>(&body);
+
+		if data.is_err() {
+			eprintln!("Could not parse server_state.json due to: {:?}", result.err());
+			return PersistentServerData::default();
+		}
+
+		return data.unwrap();
 	}
 
 	pub async fn run(mut self) -> io::Result<()> {
