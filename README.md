@@ -19,7 +19,7 @@ docker pull ghcr.io/cos40005-p12/server-amd64:BRANCH
 ```
 If you want to make and run a container for testing run the following:
 ```
-sudo docker run -p 8080:8080 -it --rm --name server ghcr.io/cos40005-p12/server-CPUARCHITECTURE:BRANCH
+sudo docker run -p 8080:8080 --rm --name server ghcr.io/cos40005-p12/server-CPUARCHITECTURE:BRANCH
 ```
 For deployment on the server instead run the following:
 ```
