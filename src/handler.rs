@@ -93,7 +93,10 @@ pub async fn ws_handler(
 				match msg {
 					AggregatedMessage::Ping(bytes) => {
 						last_heartbeat = Instant::now();
-						session.pong(&bytes).await.unwrap();
+
+						//Not checking if the session is closed here because the chance of a ping being sent then the connection immediately closing is vanishingly unlikely
+						let _ = session.pong(&bytes).await;
+
 					}
 
 					AggregatedMessage::Pong(_) => {
@@ -134,11 +137,17 @@ pub async fn ws_handler(
 						println!("Sent to Edge: {chat_msg}");
 					}
 				}
-				 session.text(chat_msg).await.unwrap();
+				let closed = session.text(chat_msg).await;
+				if closed.is_err() {
+					break None;
+				}
 			}
 
 			Some(img_data) = img_rx.recv() => {
-				session.binary(img_data).await.unwrap();
+				let closed = session.binary(img_data).await;
+				if closed.is_err() {
+					break None;
+				}
 			}
 
 			//keeps track of timeout conditions
@@ -155,7 +164,10 @@ pub async fn ws_handler(
 						}
 					break None;
 				}
-				let _ = session.ping(b"").await;
+				let closed = session.ping(b"").await;
+				if closed.is_err() {
+					break None;
+				}
 			}
 
 			else => {
