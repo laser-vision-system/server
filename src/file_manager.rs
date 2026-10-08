@@ -1,228 +1,377 @@
-use std::io::{Read, Write};
-use std::{ io};
-use std::collections::HashSet;
-use std::fs::File;
-use std::io::{Error, ErrorKind};
-use std::path::Path;
-use actix_web::http::StatusCode;
-use tokio::sync::{mpsc, oneshot};
+use std::{
+	collections::HashSet,
+	fs::File,
+	io,
+	io::{Error, ErrorKind, Read as _, Write as _},
+	path::Path,
+};
+
+use actix_web::{
+	HttpResponse,
+	http::{StatusCode, header::ContentType},
+};
 use server_edge_datatypes as datatypes;
-use actix_web::{HttpResponse, http::header::ContentType};
+use server_edge_datatypes::edge::Settings;
+use tokio::sync::{mpsc, oneshot};
+use crate::server_persist_data::PersistentServerData;
 
 #[derive(Debug)]
 pub struct SafeHttpResponse {
-    pub code: StatusCode,
-    pub body: Option<String>,
-    pub json: bool,
-    pub reason: Option<&'static str>,
+	pub code: StatusCode,
+	pub body: Option<String>,
+	pub json: bool,
+	pub reason: Option<&'static str>,
 }
 
 pub const REASONS: &[&str] = &[
-    "Unable to find file on server",
-    "Server does not have permission to access that file",
-    "Unknown error when trying to access file",
-    "File has invalid content"
+	"Unable to find file on server",
+	"Server does not have permission to access that file",
+	"Unknown error when trying to access file",
+	"File has invalid content",
+	"Unable to deserialize settings",
 ];
 
+const CONTENT_FOLDER: &str = "content";
+
+const DEFAULT_CONFIG: &str = "./content/default_config.json";
+const EDGE_LOGS: &str = "./content/edge.log";
+const SERVER_STATE: &str =  "./content/server_state.json";
+
 fn error_response(result: Error) -> SafeHttpResponse {
-    match result.kind() {
-        ErrorKind::NotFound => {
-            SafeHttpResponse {
-                code: StatusCode::NOT_FOUND,
-                json: false,
-                body: None,
-                reason: Some(REASONS[0])
-            }
-        }
+	match result.kind() {
+		ErrorKind::NotFound => SafeHttpResponse {
+			code: StatusCode::NOT_FOUND,
+			json: false,
+			body: None,
+			reason: Some(REASONS[0]),
+		},
 
-        ErrorKind::PermissionDenied => {
-            SafeHttpResponse {
-                code: StatusCode::INTERNAL_SERVER_ERROR,
-                json: false,
-                body: None,
-                reason: Some(REASONS[1])
-            }
-        }
+		ErrorKind::PermissionDenied => SafeHttpResponse {
+			code: StatusCode::INTERNAL_SERVER_ERROR,
+			json: false,
+			body: None,
+			reason: Some(REASONS[1]),
+		},
 
-        _ => {
-            SafeHttpResponse {
-                code: StatusCode::INTERNAL_SERVER_ERROR,
-                json: false,
-                body: None,
-                reason: Some(REASONS[2])
-            }
-        }
-    }
+		_ => SafeHttpResponse {
+			code: StatusCode::INTERNAL_SERVER_ERROR,
+			json: false,
+			body: None,
+			reason: Some(REASONS[2]),
+		},
+	}
 }
 
 pub fn fill_response(unformatted: SafeHttpResponse) -> HttpResponse {
-    if unformatted.reason.is_some() {
-        return HttpResponse::build(unformatted.code).reason(unformatted.reason.unwrap()).finish()
-    }
+	if unformatted.reason.is_some() {
+		return HttpResponse::build(unformatted.code)
+			.reason(unformatted.reason.unwrap())
+			.finish();
+	}
 
-    if unformatted.body.is_none() {
-        return HttpResponse::build(unformatted.code).finish();
-    }
+	if unformatted.body.is_none() {
+		return HttpResponse::build(unformatted.code).finish();
+	}
 
-    if unformatted.json {
-        return HttpResponse::Ok().
-            content_type(ContentType::json())
-            .body(unformatted.body.unwrap())
-    }
+	if unformatted.json {
+		return HttpResponse::Ok()
+			.content_type(ContentType::json())
+			.body(unformatted.body.unwrap());
+	}
 
-   HttpResponse::build(unformatted.code).content_type(ContentType::plaintext()).body(unformatted.body.unwrap())
+	HttpResponse::build(unformatted.code)
+		.content_type(ContentType::plaintext())
+		.body(unformatted.body.unwrap())
 }
 
 #[derive(Debug)]
 enum Command {
-    GetDefaultConfig {
-        tx: oneshot::Sender<SafeHttpResponse>
-    },
+	GetDefaultConfig {
+		tx: oneshot::Sender<SafeHttpResponse>,
+	},
 
-    WriteDefaultConfig {
-        tx: oneshot::Sender<SafeHttpResponse>,
-        json: String
-    },
+	WriteDefaultConfig {
+		tx: oneshot::Sender<SafeHttpResponse>,
+		settings: Settings,
+	},
 
-    WriteEdgeLogs {
-        tx: oneshot::Sender<SafeHttpResponse>,
-        logs: HashSet<String>
-    }
+	WriteEdgeLogs {
+		tx: oneshot::Sender<SafeHttpResponse>,
+		logs: HashSet<String>,
+	},
+
+	SaveServerState {
+		state: PersistentServerData,
+	},
+
+	LoadServerState {
+		tx: oneshot::Sender<PersistentServerData>,
+	}
 }
 
 #[derive(Debug)]
 pub struct FileManager {
-    cmd_rx: mpsc::UnboundedReceiver<Command>
+	cmd_rx: mpsc::UnboundedReceiver<Command>,
 }
 
 impl FileManager {
-    pub fn new() -> (Self, FileManagerHandle) {
-        let (tx, rx) = mpsc::unbounded_channel();
-        (
-            Self {
-                cmd_rx: rx,
-            },
-            FileManagerHandle {cmd_tx: tx}
-        )
-    }
+	pub fn new() -> (Self, FileManagerHandle) {
+		Self::assert_content_folder();
+		let (tx, rx) = mpsc::unbounded_channel();
+		(Self { cmd_rx: rx }, FileManagerHandle { cmd_tx: tx })
+	}
+	
+	fn assert_content_folder() {
+		let result = std::fs::create_dir_all(Path::new(CONTENT_FOLDER));
+		if result.is_ok() {
+			return
+		}
+		eprintln!("Could not create content folder!");
+		panic!();
+	}
 
-    async fn get_default_config(&mut self) -> SafeHttpResponse {
-        let path = Path::new("./src/content/default_config.json");
-        let check_file = File::options().read(true).open(path);
-        if check_file.is_err() {
-            return error_response(check_file.err().unwrap());
-        }
+	async fn init_default_config(&mut self) -> SafeHttpResponse {
 
-        let mut file = check_file.unwrap();
-        let mut body: String = "".to_string();
-        let result =file.read_to_string(&mut body);
+		let result = self.write_default_config(Settings::default()).await;
 
-        if result.is_err() {
-            return SafeHttpResponse {
-                code: StatusCode::INTERNAL_SERVER_ERROR,
-                json: false,
-                body: None,
-                reason: Some(REASONS[3])
-            }
-        }
+		if result.code != StatusCode::OK {
+			return result;
+		}
 
-        SafeHttpResponse {
-            code: StatusCode::OK,
-            json: true,
-            body: Some(body),
-            reason: None
-        }
-    }
+		let config = serde_json::to_string(&Settings::default()).unwrap();
 
-    async fn write_default_config(&mut self, json: String) -> SafeHttpResponse {
-        let path = Path::new("./src/content/default_config.json");
-        let check_file = File::options().create(true).write(true).truncate(true).open(path);
-        if check_file.is_err() {
-            return error_response(check_file.err().unwrap());
-        }
-        let mut file = check_file.unwrap();
+		SafeHttpResponse {
+			code: StatusCode::OK,
+			json: true,
+			body: Some(config),
+			reason: None,
+		}
+	}
 
-        let result = write!(&mut file, "{}", json);
+	async fn get_default_config(&mut self) -> SafeHttpResponse {
+		let path = Path::new(DEFAULT_CONFIG);
+		let check_file = File::options().read(true).open(path);
 
-        SafeHttpResponse {
-            code: StatusCode::OK,
-            json: false,
-            body: None,
-            reason: None
-        }
-    }
+		let mut body: String = String::new();
+		let mut file = match check_file {
+			Err(reason) if reason.kind() == ErrorKind::NotFound =>
+				return self.init_default_config().await,
 
-    async fn write_edge_logs(&mut self, logs: HashSet<String>) -> SafeHttpResponse {
-        let path = Path::new("./src/content/edge.log");
-        let check_file = File::options().append(true).create(true).open(path);
-        if check_file.is_err() {
-            return error_response(check_file.err().unwrap())
-        }
+			Err(reason) => return error_response(reason),
 
-        let mut file = check_file.unwrap();
-        for log in logs {
-            let result = writeln!(file, "{}", log);
-        }
+			Ok(file) => file,
+		};
 
-        SafeHttpResponse {
-            code: StatusCode::OK,
-            json: false,
-            body: None,
-            reason: None
-        }
+		let result = file.read_to_string(&mut body);
 
-    }
+		if serde_json::from_str::<Settings>(body.as_str()).is_err() {
+			return self.init_default_config().await;
+		}
 
-    pub async fn run(mut self) -> io::Result<()> {
-        while let Some(cmd) = self.cmd_rx.recv().await {
-            match cmd {
-                Command::GetDefaultConfig { tx } => {
-                    let response = self.get_default_config().await;
-                    let _ = tx.send(response);
-                }
+		if result.is_err() {
+			return SafeHttpResponse {
+				code: StatusCode::INTERNAL_SERVER_ERROR,
+				json: false,
+				body: None,
+				reason: Some(REASONS[3]),
+			};
+		}
 
-                Command::WriteDefaultConfig { tx, json } => {
-                    let response = self.write_default_config(json).await;
-                    let _ = tx.send(response);
-                }
+		SafeHttpResponse {
+			code: StatusCode::OK,
+			json: true,
+			body: Some(body),
+			reason: None,
+		}
+	}
 
-                Command::WriteEdgeLogs { tx, logs } => {
-                    let response = self.write_edge_logs(logs).await;
-                    let _ = tx.send(response);
-                }
-            }
-        }
-        Ok(())
-    }
+	async fn write_default_config(&mut self, json: Settings) -> SafeHttpResponse {
+		let path = Path::new(DEFAULT_CONFIG);
+
+		let check_file = File::options()
+			.create(true)
+			.write(true)
+			.truncate(true)
+			.open(path);
+
+		if check_file.is_err() {
+			return error_response(check_file.err().unwrap());
+		}
+		let mut file = check_file.unwrap();
+
+		let Ok(write_settings) = serde_json::to_string(&json) else{
+			return SafeHttpResponse {
+				code: StatusCode::INTERNAL_SERVER_ERROR,
+				json: false,
+				body: None,
+				reason: Some(REASONS[4]),
+			};
+		};
+
+		let _ = write!(&mut file, "{write_settings}");
+
+		SafeHttpResponse {
+			code: StatusCode::OK,
+			json: false,
+			body: None,
+			reason: None,
+		}
+	}
+
+	async fn write_edge_logs(
+		&mut self,
+		logs: HashSet<String>,
+	) -> SafeHttpResponse {
+		let path = Path::new(EDGE_LOGS);
+		let check_file = File::options().append(true).create(true).open(path);
+		if check_file.is_err() {
+			return error_response(check_file.err().unwrap());
+		}
+
+		let mut file = check_file.unwrap();
+		for log in logs {
+			let _result = writeln!(file, "{log}");
+		}
+
+		SafeHttpResponse {
+			code: StatusCode::OK,
+			json: false,
+			body: None,
+			reason: None,
+		}
+	}
+
+	async fn save_server_state(&mut self, state: PersistentServerData) {
+		let path = Path::new(SERVER_STATE);
+		let check_file = File::options()
+			.create(true)
+			.write(true)
+			.truncate(true)
+			.open(path);
+		if check_file.is_err() {
+			eprintln!{"Could not open server_state.json due to: {:?}", check_file.err().unwrap()};
+			return;
+		}
+
+		let mut file = check_file.unwrap();
+		let json = serde_json::to_string(&state).unwrap();
+		let result = writeln!(&mut file, "{json}");
+		if result.is_err() {
+			eprintln!{"Could not write to server_state.json due to: {:?}", result.err().unwrap()};
+		}
+		return;
+	}
+
+	async fn load_server_state(&mut self) -> PersistentServerData {
+		let path = Path::new(SERVER_STATE);
+		let check_file = File::options().read(true).open(path);
+
+		if check_file.is_err() {
+			eprintln!{"Could not open server_state.json due to: {:?}", check_file.err().unwrap()};
+			return PersistentServerData::default()
+		}
+
+		let mut file = check_file.unwrap();
+		let mut body: String = String::new();
+		let result = file.read_to_string(&mut body);
+
+		if result.is_err() {
+			eprintln!("Could not read server_state.json due to: {:?}", result.err().unwrap());
+			return PersistentServerData::default()
+		}
+
+		let data = serde_json::from_str::<PersistentServerData>(&body);
+
+		if data.is_err() {
+			eprintln!("Could not parse server_state.json due to: {:?}", result.err());
+			return PersistentServerData::default();
+		}
+
+		return data.unwrap();
+	}
+
+	pub async fn run(mut self) -> io::Result<()> {
+		while let Some(cmd) = self.cmd_rx.recv().await {
+			match cmd {
+				Command::GetDefaultConfig { tx } => {
+					let response = self.get_default_config().await;
+					let _ = tx.send(response);
+				},
+
+				Command::WriteDefaultConfig { tx, settings } => {
+					let response = self.write_default_config(settings).await;
+					let _ = tx.send(response);
+				},
+
+				Command::WriteEdgeLogs { tx, logs } => {
+					let response = self.write_edge_logs(logs).await;
+					let _ = tx.send(response);
+				},
+
+				Command::SaveServerState {state} => {
+					self.save_server_state(state).await;
+				}
+
+				Command::LoadServerState { tx } => {
+					let result = self.load_server_state().await;
+
+					let _ = tx.send(result);
+				}
+			}
+		}
+		Ok(())
+	}
 }
 
 #[derive(Debug, Clone)]
 pub struct FileManagerHandle {
-    cmd_tx: mpsc::UnboundedSender<Command>,
+	cmd_tx: mpsc::UnboundedSender<Command>,
 }
 
 impl FileManagerHandle {
-    pub async fn get_default_config(&self) -> SafeHttpResponse {
-        let (tx, rx) = oneshot::channel();
+	pub async fn get_default_config(&self) -> SafeHttpResponse {
+		let (tx, rx) = oneshot::channel();
 
-        self.cmd_tx.send(Command::GetDefaultConfig { tx }).unwrap();
+		self.cmd_tx.send(Command::GetDefaultConfig { tx }).unwrap();
 
-        rx.await.unwrap()
-    }
+		rx.await.unwrap()
+	}
 
-    pub async fn change_default_config(&self, json: String) -> SafeHttpResponse {
-        let (tx, rx) = oneshot::channel();
+	pub async fn change_default_config(
+		&self,
+		settings: Settings,
+	) -> SafeHttpResponse {
+		let (tx, rx) = oneshot::channel();
 
-        self.cmd_tx.send(Command::WriteDefaultConfig { tx, json }).unwrap();
+		self.cmd_tx
+			.send(Command::WriteDefaultConfig { tx, settings })
+			.unwrap();
 
-        rx.await.unwrap()
-    }
+		rx.await.unwrap()
+	}
 
-    pub async fn write_edge_logs(&self, logs: HashSet<String>) -> SafeHttpResponse {
-        let (tx, rx) = oneshot::channel();
+	pub async fn write_edge_logs(
+		&self,
+		logs: HashSet<String>,
+	) -> SafeHttpResponse {
+		let (tx, rx) = oneshot::channel();
 
-        self.cmd_tx.send(Command::WriteEdgeLogs { tx, logs }).unwrap();
+		self.cmd_tx
+			.send(Command::WriteEdgeLogs { tx, logs })
+			.unwrap();
 
-        rx.await.unwrap()
-    }
+		rx.await.unwrap()
+	}
+
+	pub async fn save_server_state(&self, state: PersistentServerData) {
+		self.cmd_tx.send(Command::SaveServerState { state }).unwrap();
+	}
+
+	pub async fn load_server_state(&self) -> PersistentServerData {
+		let (tx, rx) = oneshot::channel();
+
+		self.cmd_tx.send(Command::LoadServerState { tx }).unwrap();
+
+		rx.await.unwrap()
+	}
 }

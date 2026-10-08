@@ -1,0 +1,97 @@
+name: Rust Test
+
+on:
+  workflow_dispatch:
+
+  push:
+    branches:
+      - 'main'
+      - 'dev'
+
+    paths:
+      - '**.rs'
+      - '**.toml'
+      - 'Cargo.lock'
+
+  pull_request:
+    branches:
+      - 'main'
+      - 'dev'
+
+    paths:
+      - '**.rs'
+      - '**.toml'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test-dev:
+    name: Tests on `dev` config
+    runs-on: ubuntu-latest
+
+    # Run if one of:
+    # 1. Manually dispatched on `dev`
+    # 2. Pushed to `dev`
+    # 3. Pull request targetting `dev`
+    if: >-
+      (github.event_name == 'workflow_dispatch' && github.ref_name == 'dev') ||
+      (github.event_name == 'push' && github.ref_name == 'dev') ||
+      (github.event_name == 'pull_request' && github.base_ref == 'dev')
+
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        submodules: recursive
+        token: ${{ secrets.DOCKER_GH_AUTO_AUTH_KEY }}
+
+    - uses: dtolnay/rust-toolchain@v1
+      with:
+        toolchain: stable
+
+    - uses: Swatinem/rust-cache@v2
+      with:
+        cache-on-failure: false
+
+    - name: Build binaries in dev mode
+      run: cargo build --profile dev
+
+    - name: Run tests in dev mode
+      run: cargo test --profile dev --verbose
+
+  test-release:
+    name: Tests on `release` config
+    runs-on: ubuntu-latest
+
+    # Run if one of:
+    # 1. Manually dispatched on `main`
+    # 2. Pushed to `main` (should never happen)
+    # 3. Pull request from `dev` into `main`
+    if: >-
+      (github.event_name == 'workflow_dispatch' && github.ref_name == 'main') ||
+      (github.event_name == 'push' && github.ref_name == 'main') ||
+      (github.event_name == 'pull_request' && github.base_ref == 'main' && github.head_ref == 'dev')
+
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        submodules: recursive
+        token: ${{ secrets.DOCKER_GH_AUTO_AUTH_KEY }}
+
+    - uses: dtolnay/rust-toolchain@v1
+      with:
+        toolchain: stable
+
+    - uses: Swatinem/rust-cache@v2
+      with:
+        cache-on-failure: false
+
+    - name: Build binaries in release mode
+      run: cargo build --profile release
+
+    - name: Run tests in release mode
+      run: cargo test --profile release --verbose

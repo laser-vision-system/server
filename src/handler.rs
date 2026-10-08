@@ -1,405 +1,384 @@
-
 use std::time::{Duration, Instant};
 
-use actix_ws::{AggregatedMessage, CloseReason};
+use actix_ws::{AggregatedMessage, CloseCode, CloseReason, Message};
+use datatypes::shared::ConnId;
 use futures_util::StreamExt as _;
+use serde::Serialize;
+use serde_json::Result;
+use server_edge_datatypes as datatypes;
+use server_edge_datatypes::edge::ServerRequests as EdgeServerRequests;
+use server_edge_datatypes::gui::ServerRequests as GUIServerRequests;
 use tokio::{sync::mpsc, time::interval};
 
 use crate::{ServerHandle, WSSide};
-use server_edge_datatypes as datatypes;
-use serde_json::Result;
-use datatypes::shared::{ConnId};
+use rand::{self, RngExt as _};
 
-const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(2);
-const CLIENT_TIMEOUT: Duration = Duration::from_secs(5);
+const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(6);
+const CLIENT_TIMEOUT: Duration = Duration::from_secs(12);
 
-//generic websocket handler - can process both edge and GUI websockets, although it may not be generic enough to handle images.
+// generic websocket handler - can process both edge and GUI websockets,
+// although it may not be generic enough to handle images.
 pub async fn ws_handler(
-    server: ServerHandle,
-    mut session: actix_ws::Session,
-    msg_stream: actix_ws::MessageStream,
-    side: WSSide
-){
-    let mut last_heartbeat = Instant::now();
-    let mut interval = interval(HEARTBEAT_INTERVAL);
+	server: ServerHandle,
+	mut session: actix_ws::Session,
+	msg_stream: actix_ws::MessageStream,
+	side: WSSide,
+) {
+	let mut last_heartbeat = Instant::now();
+	let mut interval = interval(HEARTBEAT_INTERVAL);
 
-    let (conn_tx, mut conn_rx) = mpsc::unbounded_channel();
+	let mut msg_stream = msg_stream
+		.max_frame_size(20 * 1024 * 1024)
+		.aggregate_continuations()
+		.max_continuation_size(2 * 1024 * 1024);
 
-    let (img_tx, mut img_rx) = mpsc::unbounded_channel();
+	let (conn_tx, mut conn_rx) = mpsc::unbounded_channel();
 
-    let send_img_tx;
+	let (img_tx, mut img_rx) = mpsc::unbounded_channel();
 
-    match side {
-        WSSide::Edge => {
-            send_img_tx = None;
-        }
+	let send_img_tx = match side {
+		WSSide::GUI => Some(img_tx),
+		WSSide::Edge => None,
+	};
 
-        WSSide::GUI => {
-            send_img_tx = Some(img_tx);
-        }
-    }
+	if side == WSSide::Edge {
+		img_rx.close()
+	}
 
-    let conn_id = server.connect(conn_tx, side, send_img_tx).await;
+	let conn_id = match side {
+		WSSide::GUI => rand::rng().random::<ConnId>(),
+		WSSide::Edge => {
+			let Some(data) = initialise_edge_connection(&mut msg_stream).await
+			else {
+				let _ = session.close(Some(CloseReason{
+					code: CloseCode::Protocol,
+					description: Some(
+						"Edge connections must send an initialisation command before any other data"
+							.to_string()
+						)
+					}
+				));
+				return;
+			};
+			data
+		},
+	};
 
-    match side {
-        WSSide::GUI => {
-            println!("GUI connected: {}", conn_id)
-        }
+	if !server.connect(conn_tx, conn_id, side, send_img_tx).await {
+		eprintln!("Invalid edge ID");
+		let _ = session.close(Some(CloseReason {
+			code: CloseCode::Invalid,
+			description: Some(
+				"Invalid ID for initialisation: ID already in use".to_string(),
+			),
+		}));
+		return;
+	}
 
-        WSSide::Edge => {
-            println!("Edge connected: {}", conn_id)
-        }
-    }
+	match side {
+		WSSide::GUI => {
+			println!("GUI connected: {conn_id}");
+		},
 
-    let mut msg_stream = msg_stream
-        .max_frame_size(20 * 1024 * 1024)
-        .aggregate_continuations()
-        .max_continuation_size(2 * 1024 * 1024);
+		WSSide::Edge => {
+			println!("Edge connected: {conn_id}");
+		},
+	}
 
-    let close_reason: Option<CloseReason> = loop {
-        tokio::select! { //waits for the first of the following events:
-            //handles incoming ws traffic
-            Some(Ok(msg)) = msg_stream.next() => {
-                match msg {
-                    AggregatedMessage::Ping(bytes) => {
-                        last_heartbeat = Instant::now();
-                        session.pong(&bytes).await.unwrap();
-                    }
+	let close_reason: Option<CloseReason> = loop {
+		tokio::select! { //waits for the first of the following events:
+			//handles incoming ws traffic
+			Some(Ok(msg)) = msg_stream.next() => {
+				match msg {
+					AggregatedMessage::Ping(bytes) => {
+						last_heartbeat = Instant::now();
 
-                    AggregatedMessage::Pong(_) => {
-                        last_heartbeat = Instant::now();
-                    }
+						//Not checking if the session is closed here because the chance of a ping being sent then the connection immediately closing is vanishingly unlikely
+						let _ = session.pong(&bytes).await;
 
-                    AggregatedMessage::Text(text) => {
-                        last_heartbeat = Instant::now();
-                        process_ws(&server, &text, conn_id, side)
-                            .await;
-                    }
+					}
 
-                    AggregatedMessage::Binary(bin) => {
-                        match side {
-                            WSSide::GUI => {
-                                break None
-                            }
+					AggregatedMessage::Pong(_) => {
+						last_heartbeat = Instant::now();
+					}
 
-                            WSSide::Edge => {
-                                server.route_image(conn_id, bin).await;
-                            }
-                        }
-                    }
+					AggregatedMessage::Text(text) => {
+						last_heartbeat = Instant::now();
+						process_ws(&server, &text, conn_id, side)
+							.await;
+					}
 
-                    AggregatedMessage::Close(reason) => break reason,
+					AggregatedMessage::Binary(bin) => {
+						match side {
+							WSSide::GUI => {
+								break None
+							}
 
-                }
-            }
+							WSSide::Edge => {
+								server.route_image(conn_id, bin).await;
+							}
+						}
+					}
 
-            //Sends any text input to the conn_tx sender back to the client
-            Some(chat_msg) = conn_rx.recv() => {
-                match side {
-                    WSSide::GUI => {
-                        println!("Sent to GUI: {}", chat_msg);
-                    }
+					AggregatedMessage::Close(reason) => break reason,
 
-                    WSSide::Edge => {
-                        println!("Sent to Edge: {}", chat_msg);
-                    }
-                }
-                 session.text(chat_msg).await.unwrap();
-            }
+				}
+			}
 
-            Some(img_data) = img_rx.recv() => {
-                println!("Routing image to: {:?}", conn_id);
-                session.binary(img_data).await.unwrap();
-            }
+			//Sends any text input to the conn_tx sender back to the client
+			Some(chat_msg) = conn_rx.recv() => {
+				match side {
+					WSSide::GUI => {
+						println!("Sent to GUI: {chat_msg}");
+					}
 
-            //keeps track of timeout conditions
-            _ = interval.tick() => {
-                if Instant::now().duration_since(last_heartbeat) > CLIENT_TIMEOUT {
-                        match side {
-                            WSSide::GUI => {
-                                println!("GUI timed out: {}", conn_id)
-                            }
+					WSSide::Edge => {
+						println!("Sent to Edge: {chat_msg}");
+					}
+				}
+				let closed = session.text(chat_msg).await;
+				if closed.is_err() {
+					break None;
+				}
+			}
 
-                            WSSide::Edge => {
-                                println!("Edge timed out: {}", conn_id)
-                            }
-                        }
-                    break None;
-                }
-                let _ = session.ping(b"").await;
-            }
+			Some(img_data) = img_rx.recv() => {
+				let closed = session.binary(img_data).await;
+				if closed.is_err() {
+					break None;
+				}
+			}
 
-            else => {
-                break None;
-            }
-        }
-    };
+			//keeps track of timeout conditions
+			_ = interval.tick() => {
+				if Instant::now().duration_since(last_heartbeat) > CLIENT_TIMEOUT {
+						match side {
+							WSSide::GUI => {
+								println!("GUI timed out: {conn_id}");
+							}
 
-    match side {
-        WSSide::GUI => {
-            println!("GUI disconnected: {}", conn_id)
-        }
+							WSSide::Edge => {
+								println!("Edge timed out: {conn_id}");
+							}
+						}
+					break None;
+				}
+				let closed = session.ping(b"").await;
+				if closed.is_err() {
+					break None;
+				}
+			}
 
-        WSSide::Edge => {
-            println!("Edge disconnected: {}", conn_id)
-        }
-    }
+			else => {
+				break None;
+			}
+		}
+	};
 
-    server.disconnect(conn_id, side).await;
+	match side {
+		WSSide::GUI => {
+			println!("GUI disconnected: {conn_id}");
+		},
 
-    let _ = session.close(close_reason).await;
+		WSSide::Edge => {
+			println!("Edge disconnected: {conn_id}");
+		},
+	}
+
+	server.disconnect(conn_id, side).await;
+
+	let _ = session.close(close_reason).await;
+}
+
+async fn initialise_edge_connection(
+	msg_stream: &mut actix_ws::AggregatedMessageStream,
+) -> Option<ConnId> {
+	let Some(Ok(AggregatedMessage::Text(text))) = msg_stream.next().await
+	else {
+		eprintln!(
+			"Websocket stream received invalid input while waiting for initialisation"
+		);
+		return None;
+	};
+
+	let msg = text.trim();
+	let data_unchecked =
+		serde_json::from_str::<datatypes::edge::ServerRequests>(&msg);
+	let Ok(command) = data_unchecked else {
+		eprintln!(
+			"Websocket stream received invalid text input while waiting for initialisation"
+		);
+		return None;
+	};
+
+	let datatypes::edge::ServerRequests::InitialiseConnection(data) = command
+	else {
+		eprintln!(
+			"Websocket stream received invalid command while waiting for initialisation"
+		);
+		return None;
+	};
+	Some(data.edge_id)
 }
 
 async fn process_ws(
-    server: &ServerHandle,
-    text: &str,
-    conn: ConnId,
-    side: WSSide
+	server: &ServerHandle,
+	text: &str,
+	conn: ConnId,
+	side: WSSide,
 ) {
-    match side  {
-        WSSide::Edge => {
-            edge_process(server, text, conn).await;
-        },
-        WSSide::GUI => {
-            gui_process(server, text, conn).await;
-        }
-    }
-    //this should contain the actual logic to deal with incoming text strings from the websockets. Whether this needs to divide into edge and gui functions right away is tbd
+	match side {
+		WSSide::Edge => {
+			edge_process(server, text, conn).await;
+		},
+		WSSide::GUI => {
+			gui_process(server, text, conn).await;
+		},
+	}
 }
 
-async fn gui_process(
-    server: &ServerHandle,
-    text: &str,
-    conn: ConnId
-) {
-    let msg = text.trim();
-    if msg != "Ping"{
-        println!("Received from GUI: {}", msg);
-    }
+async fn gui_process(server: &ServerHandle, text: &str, conn: ConnId) {
+	let msg = text.trim();
+	if msg == "\"Ping\"" || msg == "Ping" {
+		return;
+	}
 
-    let mut args = msg.splitn(2, ':');
+	println!("Received from GUI: {msg}");
 
-    match args.next().unwrap() {
-        "ListCameras"  => {
-            server.list_cameras(conn).await;
-        }
+	let data_unchecked: Result<GUIServerRequests> = serde_json::from_str(msg);
 
-        "ListEdges" => {
-            server.list_edges(conn).await;
-        }
-        "SetNameCamera"  => match args.next() {
-            Some(data) => {
-                let data_unchecked: Result<datatypes::gui::SetNameCamera> = serde_json::from_str(data);
-                if data_unchecked.is_ok() {
-                    let json = data_unchecked.unwrap();
-                    server.set_name_camera(json).await;
-                }
-            }
+	let Ok(data) = data_unchecked else {
+		eprintln!(
+			"Message could not deserialized due to: {:?}",
+			data_unchecked.err().unwrap().to_string()
+		);
+		return;
+	};
 
-            None => {}
-        }
+	match data {
+		GUIServerRequests::ListEdges => server.list_edges(conn).await,
 
-        "StartViewingCamera"  => match args.next() {
-            Some(data) => {
-                let data_unchecked: Result<datatypes::gui::StartViewingCamera> = serde_json::from_str(data);
-                if data_unchecked.is_ok() {
-                    let json = data_unchecked.unwrap();
-                    server.start_viewing_camera(conn, json).await;
-                }
-            }
+		GUIServerRequests::ListCameras => server.list_cameras(conn).await,
 
-            None => {}
-        }
+		GUIServerRequests::ListDisconnectedEdges => {
+			server.list_disconnected_edges(conn).await
+		},
 
+		GUIServerRequests::ForgetEdge(data) => server.forget_edge(data).await,
 
-        "StopViewingCamera"  => {
-            server.stop_viewing_camera(conn).await;
-        }
+		GUIServerRequests::ViewCameraConfig(data) => {
+			server.view_camera_config(conn, data).await
+		},
 
-        "Setpoint" => match args.next() {
-            Some(data) => {
-                let data_unchecked: Result<datatypes::gui::Setpoint> = serde_json::from_str(data);
-                if data_unchecked.is_ok()  {
-                    let json = data_unchecked.unwrap();
-                    server.setpoint(Some(json)).await;
-                }
-            }
+		GUIServerRequests::Configuration(data) => {
+			server.configuration(conn, data, WSSide::GUI).await
+		},
 
-            None => {
-                server.setpoint(None).await;
-            }
-        }
+		GUIServerRequests::SetEdgeName(data) => {
+			server.set_edge_name(data).await
+		},
 
-        "ViewCameraConfig" => match args.next() {
-            Some(data) => {
-                let data_unchecked: Result<datatypes::shared::ViewCameraConfig> = serde_json::from_str(data);
-                if data_unchecked.is_ok()  {
-                    let json = data_unchecked.unwrap();
-                    server.view_camera_config(conn, json).await;
-                }
-            }
+		GUIServerRequests::SetEdgeProcessingType(data) => {
+			server.set_edge_processing_type(data).await
+		},
 
-            None => {}
-        }
+		GUIServerRequests::SetCameraThresholds(data) => {
+			server.set_camera_thresholds(data).await
+		},
 
-        "Configuration" => match args.next() {
-            Some(data) => {
-                let data_unchecked: Result<datatypes::shared::Configuration> = serde_json::from_str(data);
-                if data_unchecked.is_ok()  {
-                    let json = data_unchecked.unwrap();
-                    server.configuration(conn, json, WSSide::GUI).await;
-                }
-            }
+		GUIServerRequests::SetDefaultThreshold(data) => {
+			server.set_default_thresholds(data).await
+		},
 
-            None => {}
-        }
+		GUIServerRequests::GetDefaultThresholds => {
+			server.get_default_thresholds(conn).await
+		},
 
-        "ForgetCameraRequest" => match args.next() {
-            Some(data) => {
-                let data_unchecked: Result<datatypes::shared::ForgetCameraRequest> = serde_json::from_str(data);
-                if data_unchecked.is_ok()  {
-                    let json = data_unchecked.unwrap();
-                    server.forget_camera(conn, json, WSSide::GUI).await;
-                }
-            }
-            None => {}
-        }
+		GUIServerRequests::SetNameCamera(data) => {
+			server.set_name_camera(data).await
+		},
 
-        "SetCameraThresholds" => match args.next() {
-            Some(data) => {
-                let data_unchecked: Result<datatypes::gui::SetCameraThresholds> = serde_json::from_str(data);
-                if data_unchecked.is_ok()  {
-                    let json = data_unchecked.unwrap();
-                    server.set_camera_thresholds(json).await;
-                }
-            }
-            None => {}
-        }
+		GUIServerRequests::StartViewingCamera(data) => {
+			server.start_viewing_camera(conn, data).await
+		},
 
-        "SetDefaultThreshold" => match args.next() {
-            Some(data) => {
-                let data_unchecked: Result<datatypes::gui::SetDefaultThreshold> = serde_json::from_str(data);
-                if data_unchecked.is_ok()  {
-                    let json = data_unchecked.unwrap();
-                    server.set_default_thresholds(json).await;
-                }
-            }
+		GUIServerRequests::StopViewingCamera => {
+			server.stop_viewing_camera(conn).await
+		},
 
-            None => {}
-        }
+		GUIServerRequests::Setpoint(data) => server.setpoint(Some(data)).await,
 
-        "SetEdgeProcessingType" => match args.next() {
-            Some(data) => {
-                let data_unchecked: Result<datatypes::gui::SetEdgeProcessingType> = serde_json::from_str(data);
-                if data_unchecked.is_ok()  {
-                    let json = data_unchecked.unwrap();
-                    server.set_edge_processing_type(conn, json).await;
-                }
-            }
+		GUIServerRequests::ForgetCameraRequest(data) => {
+			server.forget_camera(conn, data, WSSide::GUI).await
+		},
 
-            None => {}
-        }
+		GUIServerRequests::ForceRetryCamera(data) => {
+			server.force_retry_camera(data).await
+		},
 
-        "GetDefaultThresholds"  =>  {
-            server.get_default_thresholds(conn).await;
-        }
+		GUIServerRequests::ListProcessingTypes => {
+			server.list_processing_types(conn).await
+		},
 
-        "SetEdgeName" => match args.next() {
-            Some(data) => {
-                let data_unchecked: Result<datatypes::gui::SetEdgeName> = serde_json::from_str(data);
-                if data_unchecked.is_ok()  {
-                    let json = data_unchecked.unwrap();
-                    server.set_edge_name(json).await;
-                }
-            }
-
-            None => {}
-        }
-
-        _ => {
-
-        }
-    }
+		_ => {
+			eprintln!("Message not recognised");
+		},
+	}
 }
 
-async fn edge_process(
-    server: &ServerHandle,
-    text: &str,
-    conn: ConnId
-) {
-    let msg = text.trim();
+async fn edge_process(server: &ServerHandle, text: &str, conn: ConnId) {
+	let msg = text.trim();
 
-    println!("Received from Edge: {}", msg);
+	println!("Received from Edge: {msg}");
 
-    let mut args = msg.splitn(2, ':');
-    match args.next().unwrap() {
+	let data_unchecked: Result<EdgeServerRequests> = serde_json::from_str(msg);
 
-        "RegisterCameras" => match args.next() {
-            Some(data) => {
-                let data_unchecked: Result<datatypes::edge::RegisterCameras> = serde_json::from_str(data);
-                if data_unchecked.is_ok()  {
-                    let json = data_unchecked.unwrap();
-                    server.register_cameras(conn, json.cameras).await;
-                }
-            }
+	let Ok(data) = data_unchecked else {
+		eprintln!(
+			"Message could not deserialized due to: {:?}",
+			data_unchecked.err().unwrap().to_string()
+		);
+		return;
+	};
 
-            None => {
+	match data {
+		EdgeServerRequests::InitialiseConnection(_) => {
+			eprintln!(
+				"Already initialised connection tried initialising: {:?}",
+				conn
+			);
+		},
 
-            }
-        }
+		EdgeServerRequests::RegisterCameras(data) => {
+			server.register_cameras(conn, data.cameras).await
+		},
 
-        "UpdateCameraStatus" => match args.next() {
-            Some(data) => {
-                let data_unchecked: Result<datatypes::edge::UpdateCameraStatus> = serde_json::from_str(data);
-                if data_unchecked.is_ok()  {
-                    let json = data_unchecked.unwrap();
-                    server.update_camera_status(conn, json).await;
-                }
-            }
+		EdgeServerRequests::UpdateCameraStatus(data) => {
+			server.update_camera_status(conn, data).await
+		},
 
-            None => {
+		EdgeServerRequests::ImageAnalysis(data) => {
+			server.image_analysis(conn, data).await
+		},
 
-            }
-        }
+		EdgeServerRequests::Configuration(data) => {
+			server.configuration(conn, data, WSSide::Edge).await
+		},
 
-        "ImageAnalysis" => match args.next() {
-            Some(data) => {
-                let data_unchecked: Result<datatypes::edge::ImageAnalysis> = serde_json::from_str(data);
-                if data_unchecked.is_ok()  {
-                    let json = data_unchecked.unwrap();
-                    server.image_analysis(conn, json).await;
-                }
-            }
-            None => {
+		EdgeServerRequests::ForgetCameraRequest(data) => {
+			server.forget_camera(conn, data, WSSide::Edge).await
+		},
 
-            }
-        }
+		EdgeServerRequests::Alert(data) => {
+			server.alert_from_edge(conn, data).await
+		},
 
-        "Configuration" => match args.next() {
-            Some(data) => {
-                let data_unchecked: Result<datatypes::shared::Configuration> = serde_json::from_str(data);
-                if data_unchecked.is_ok()  {
-                    let json = data_unchecked.unwrap();
-                    server.configuration(conn, json, WSSide::Edge).await;
-                }
-            }
+		EdgeServerRequests::SetNameCamera(data) => {
+			server.edge_camera_name_update(conn, data).await
+		},
 
-            None => {}
-        }
-
-        "ForgetCameraRequest" => match args.next() {
-            Some(data) => {
-                let data_unchecked: Result<datatypes::shared::ForgetCameraRequest> = serde_json::from_str(data);
-                if data_unchecked.is_ok()  {
-                    let json = data_unchecked.unwrap();
-                    server.forget_camera(conn, json, WSSide::Edge).await;
-                }
-            }
-            None => {}
-        }
-
-        _ => {
-
-        }
-    }
+		_ => {
+			eprintln!("Message not recognised");
+		},
+	}
 }
