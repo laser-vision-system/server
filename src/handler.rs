@@ -13,8 +13,8 @@ use tokio::{sync::mpsc, time::interval};
 use crate::{ServerHandle, WSSide};
 use rand::{self, RngExt as _};
 
-const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(5);
-const CLIENT_TIMEOUT: Duration = Duration::from_secs(20);
+const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(6);
+const CLIENT_TIMEOUT: Duration = Duration::from_secs(12);
 
 // generic websocket handler - can process both edge and GUI websockets,
 // although it may not be generic enough to handle images.
