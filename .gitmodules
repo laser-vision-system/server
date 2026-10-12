@@ -1,3 +1,3 @@
-[submodule "server-edge-datatypes"]
-	path = server-edge-datatypes
-	url = https://github.com/COS40005-P12/server-edge-datatypes
+[submodule "api"]
+	path = api
+	url = https://github.com/COS40005-P12/api.git
