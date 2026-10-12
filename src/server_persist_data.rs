@@ -1,7 +1,9 @@
 use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
-use server_edge_datatypes::gui::CameraDetails;
-use server_edge_datatypes::shared::{CameraId, CameraStatus, ConnId, Deviation};
+use api::{
+    gui::CameraDetails,
+    shared::{CameraStatus, ConnId, Deviation}
+};
 use crate::server::UniqueCameraID;
 
 #[derive(Serialize, Deserialize, Debug, Clone)]

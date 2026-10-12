@@ -4,21 +4,18 @@ use std::{
 };
 use std::time::Duration;
 use actix_web::web::Bytes;
-use datatypes::{
-	gui::CameraDetails,
-	shared::{CameraId, ConnId},
-};
-use rand::{self, RngExt as _};
 use serde::{Deserialize, Serialize};
-use server_edge_datatypes as datatypes;
-use server_edge_datatypes::edge::EdgeRequests;
-use server_edge_datatypes::gui::GUIRequests;
-use server_edge_datatypes::shared::{CameraStatus, Deviation};
+use api::{
+	shared::{CameraId, ConnId},
+	edge::{self, EdgeRequests},
+	gui::{self, CameraDetails, GUIRequests},
+	shared::{self, CameraStatus, Deviation}
+};
 use tokio::sync::{mpsc, mpsc::UnboundedSender, oneshot};
 use tokio::time::interval;
 use crate::WSSide::Edge;
 use crate::{Msg, WSSide};
-use crate::file_manager::{FileManager, FileManagerHandle};
+use crate::file_manager::FileManagerHandle;
 use crate::server_persist_data::{PersistentServerData, ShortCameraDetails};
 
 #[derive(Debug)]
@@ -38,21 +35,21 @@ enum Command {
 
 	RegisterCameras {
 		conn: ConnId,
-		cameras: HashMap<CameraId, datatypes::edge::NewCameraInfo>,
+		cameras: HashMap<CameraId, edge::NewCameraInfo>,
 	},
 
 	UpdateCameraStatus {
 		conn: ConnId,
-		data: datatypes::edge::UpdateCameraStatus,
+		data: edge::UpdateCameraStatus,
 	},
 
 	ImageAnalysis {
 		conn: ConnId,
-		analysis: datatypes::edge::ImageAnalysis,
+		analysis: edge::ImageAnalysis,
 	},
 
 	Setpoint {
-		target: Option<datatypes::gui::Setpoint>,
+		target: Option<gui::Setpoint>,
 	},
 
 	ListCameras {
@@ -64,7 +61,7 @@ enum Command {
 	},
 
 	ForgetEdge {
-		data: datatypes::gui::ForgetEdge,
+		data: gui::ForgetEdge,
 	},
 
 	SetNameCamera {
@@ -85,18 +82,18 @@ enum Command {
 
 	ViewCameraConfig {
 		conn: ConnId,
-		camera: datatypes::shared::ViewCameraConfig,
+		camera: shared::ViewCameraConfig,
 	},
 
 	Configuration {
 		conn: ConnId,
-		config: datatypes::shared::Configuration,
+		config: shared::Configuration,
 		side: WSSide,
 	},
 
 	ForgetCamera {
 		conn: ConnId,
-		target: datatypes::shared::ForgetCameraRequest,
+		target: shared::ForgetCameraRequest,
 		side: WSSide,
 	},
 
@@ -106,15 +103,15 @@ enum Command {
 	},
 
 	SetCameraThresholds {
-		data: datatypes::gui::SetCameraThresholds,
+		data: gui::SetCameraThresholds,
 	},
 
 	SetDefaultThresholds {
-		data: datatypes::gui::SetDefaultThreshold,
+		data: gui::SetDefaultThreshold,
 	},
 
 	SetEdgeProcessingType {
-		data: datatypes::gui::SetEdgeProcessingType,
+		data: gui::SetEdgeProcessingType,
 	},
 
 	GetDefaultThresholds {
@@ -126,21 +123,21 @@ enum Command {
 	},
 
 	SetEdgeName {
-		data: datatypes::gui::SetEdgeName,
+		data: gui::SetEdgeName,
 	},
 
 	AlertFromEdge {
 		conn: ConnId,
-		data: datatypes::edge::Alert,
+		data: edge::Alert,
 	},
 
 	AlertFromServer {
 		target: Option<ConnId>,
-		data: datatypes::edge::Alert,
+		data: edge::Alert,
 	},
 
 	ForceRetryCamera {
-		data: datatypes::gui::ForceRetryCamera,
+		data: gui::ForceRetryCamera,
 	},
 
 	ListProcessingTypes {
@@ -149,7 +146,7 @@ enum Command {
 
 	EdgeCameraNameUpdate {
 		conn: ConnId,
-		data: datatypes::edge::SetNameCamera
+		data: edge::SetNameCamera
 	}
 }
 
@@ -274,7 +271,7 @@ impl Server {
 				}
 
 				for camera in cameras {
-					let new_status = datatypes::edge::UpdateCameraStatus {
+					let new_status = edge::UpdateCameraStatus {
 						camera_id: camera.1,
 						status: CameraStatus::Disconnected,
 					};
@@ -321,7 +318,7 @@ impl Server {
 	async fn register_cameras(
 		&mut self,
 		conn: ConnId,
-		cameras: HashMap<CameraId, datatypes::edge::NewCameraInfo>,
+		cameras: HashMap<CameraId, edge::NewCameraInfo>,
 	) {
 		for camera in cameras {
 			let camera_id = camera.0;
@@ -369,7 +366,7 @@ impl Server {
 	async fn update_camera_status(
 		&mut self,
 		conn: ConnId,
-		data: datatypes::edge::UpdateCameraStatus,
+		data: edge::UpdateCameraStatus,
 	) {
 		let get_details = self.cameras.get(&UniqueCameraID {
 			conn,
@@ -428,9 +425,9 @@ impl Server {
 	async fn image_analysis(
 		&mut self,
 		conn: ConnId,
-		analysis: datatypes::edge::ImageAnalysis,
+		analysis: edge::ImageAnalysis,
 	) {
-		let gui_struct = datatypes::gui::ImageAnalysis {
+		let gui_struct = gui::ImageAnalysis {
 			conn_id: conn.to_string(),
 			camera_id: analysis.camera_id,
 			deviation: analysis.deviation,
@@ -442,7 +439,7 @@ impl Server {
 		}
 	}
 
-	async fn set_point(&mut self, target: Option<datatypes::gui::Setpoint>) {
+	async fn set_point(&mut self, target: Option<gui::Setpoint>) {
 		if let Some(target) = target {
 			if self.is_connected(target.conn_id, target.camera_id) {
 				self.send_set_point(target.conn_id, target.camera_id).await;
@@ -461,7 +458,7 @@ impl Server {
 	}
 
 	async fn send_set_point(&mut self, conn: ConnId, camera: CameraId) {
-		let edge_struct = datatypes::edge::Setpoint { camera_id: camera };
+		let edge_struct = edge::Setpoint { camera_id: camera };
 		let msg = EdgeRequests::Setpoint(edge_struct);
 		let send = serde_json::to_string(&msg).unwrap();
 		let target = &self.edge_sessions[&conn];
@@ -477,7 +474,7 @@ impl Server {
 			cameras_sendable.insert(key, camera.1);
 		}
 
-		let gui_struct = datatypes::gui::ListOfCameras {
+		let gui_struct = gui::ListOfCameras {
 			cameras: cameras_sendable,
 		};
 
@@ -501,7 +498,7 @@ impl Server {
 			return;
 		}
 
-		let edge_struct = datatypes::edge::SetNameCamera {
+		let edge_struct = edge::SetNameCamera {
 			camera_id: camera,
 			name,
 		};
@@ -513,7 +510,7 @@ impl Server {
 		target.send(send.clone()).unwrap();
 	}
 
-	async fn edge_camera_name_update(&mut self, conn_id: ConnId, data: datatypes::edge::SetNameCamera) {
+	async fn edge_camera_name_update(&mut self, conn_id: ConnId, data: edge::SetNameCamera) {
 		let camera_id = UniqueCameraID {
 			conn: conn_id,
 			camera: data.camera_id,
@@ -568,7 +565,7 @@ impl Server {
 		}
 
 		let edge_struct =
-			datatypes::edge::StartViewingCamera { camera_id: camera };
+			edge::StartViewingCamera { camera_id: camera };
 
 		let msg = EdgeRequests::StartViewingCamera(edge_struct);
 		let send = serde_json::to_string(&msg).unwrap();
@@ -595,7 +592,7 @@ impl Server {
 		}
 
 		let edge_struct =
-			datatypes::edge::StopViewingCamera { camera_id: route.1 };
+			edge::StopViewingCamera { camera_id: route.1 };
 		let msg = EdgeRequests::StopViewingCamera(edge_struct);
 		let send = serde_json::to_string(&msg).unwrap();
 
@@ -606,7 +603,7 @@ impl Server {
 	async fn configuration(
 		&mut self,
 		conn: ConnId,
-		config: datatypes::shared::Configuration,
+		config: shared::Configuration,
 		side: WSSide,
 	) {
 		match side {
@@ -626,7 +623,7 @@ impl Server {
 		let target: Option<&UnboundedSender<Msg>>;
 		match side {
 			WSSide::GUI => {
-				let fwd_config = datatypes::shared::Configuration {
+				let fwd_config = shared::Configuration {
 					conn_id: conn,
 					camera_id: config.camera_id,
 					configuration: config.configuration,
@@ -636,7 +633,7 @@ impl Server {
 				target = self.edge_sessions.get(&config.conn_id);
 			},
 			WSSide::Edge => {
-				let fwd_config = datatypes::gui::Configuration {
+				let fwd_config = gui::Configuration {
 					conn_id: conn.to_string(),
 					camera_id: config.camera_id,
 					configuration: config.configuration,
@@ -656,14 +653,14 @@ impl Server {
 	async fn view_camera_config(
 		&mut self,
 		conn: ConnId,
-		camera: datatypes::shared::ViewCameraConfig,
+		camera: shared::ViewCameraConfig,
 	) {
 		if !self.is_connected(camera.conn_id, camera.camera_id) {
 			return;
 		}
 
-		let fwd_data: datatypes::shared::ViewCameraConfig =
-			datatypes::shared::ViewCameraConfig {
+		let fwd_data: shared::ViewCameraConfig =
+			shared::ViewCameraConfig {
 				conn_id: conn,
 				camera_id: camera.camera_id,
 			};
@@ -678,7 +675,7 @@ impl Server {
 	async fn forget_camera(
 		&mut self,
 		conn: ConnId,
-		target: datatypes::shared::ForgetCameraRequest,
+		target: shared::ForgetCameraRequest,
 		side: WSSide,
 	) {
 		let camera: UniqueCameraID;
@@ -714,7 +711,7 @@ impl Server {
 
 		match side {
 			WSSide::Edge => {
-				let data = datatypes::gui::ForgetCamera {
+				let data = gui::ForgetCamera {
 					conn_id: conn.to_string(),
 					camera_id: target.camera_id,
 					confirm: target.confirm,
@@ -738,7 +735,7 @@ impl Server {
 			},
 
 			WSSide::GUI => {
-				let data = datatypes::shared::ForgetCameraRequest {
+				let data = shared::ForgetCameraRequest {
 					conn_id: conn,
 					camera_id: target.camera_id,
 					confirm: target.confirm,
@@ -782,7 +779,7 @@ impl Server {
 
 	async fn set_camera_thresholds(
 		&mut self,
-		data: datatypes::gui::SetCameraThresholds,
+		data: gui::SetCameraThresholds,
 	) {
 		let camera = UniqueCameraID {
 			conn: data.edge_id,
@@ -808,7 +805,7 @@ impl Server {
 
 	async fn set_default_thresholds(
 		&mut self,
-		data: datatypes::gui::SetDefaultThreshold,
+		data: gui::SetDefaultThreshold,
 	) {
 		self.default_warn_threshold = data.warn_below_threshold;
 		self.default_alert_threshold = data.alert_below_threshold;
@@ -818,9 +815,9 @@ impl Server {
 
 	async fn set_edge_processing(
 		&mut self,
-		data: datatypes::gui::SetEdgeProcessingType,
+		data: gui::SetEdgeProcessingType,
 	) {
-		let send_data = datatypes::edge::SetProcessingType {
+		let send_data = edge::SetProcessingType {
 			processing_type: data.processing_type,
 		};
 		let msg = EdgeRequests::SetProcessingType(send_data);
@@ -835,7 +832,7 @@ impl Server {
 	}
 
 	async fn get_default_thresholds(&mut self, conn_id: ConnId) {
-		let data = datatypes::gui::DefaultThresholds {
+		let data = gui::DefaultThresholds {
 			warn_below_threshold: self.default_warn_threshold,
 			alert_below_threshold: self.default_alert_threshold,
 			warn_above_threshold: self.default_warn_above_threshold,
@@ -868,7 +865,7 @@ impl Server {
 			edge_names_copy.insert(edge.0.to_string(), edge.1);
 		}
 
-		let data = datatypes::gui::ListOfEdges {
+		let data = gui::ListOfEdges {
 			edges: edge_names_copy,
 		};
 		let msg = GUIRequests::ListOfEdges(data);
@@ -896,7 +893,7 @@ impl Server {
 			edge_names_copy.insert(edge.0.to_string(), edge.1);
 		}
 
-		let data = datatypes::gui::DisconnectedEdges {
+		let data = gui::DisconnectedEdges {
 			edges: edge_names_copy,
 		};
 		let msg = GUIRequests::DisconnectedEdges(data);
@@ -908,7 +905,7 @@ impl Server {
 		}
 	}
 
-	async fn forget_edge(&mut self, data: datatypes::gui::ForgetEdge) {
+	async fn forget_edge(&mut self, data: gui::ForgetEdge) {
 		if self.edge_sessions.contains_key(&data.conn) {
 			return;
 		}
@@ -921,7 +918,7 @@ impl Server {
 		}
 	}
 
-	async fn set_edge_name(&mut self, data: datatypes::gui::SetEdgeName) {
+	async fn set_edge_name(&mut self, data: gui::SetEdgeName) {
 		self.edge_names
 			.entry(data.edge_id)
 			.and_modify(|entry| *entry = data.name);
@@ -930,10 +927,10 @@ impl Server {
 	async fn send_alert(
 		&mut self,
 		conn_id: Option<ConnId>,
-		alert: datatypes::edge::Alert,
+		alert: edge::Alert,
 		target: Option<ConnId>,
 	) {
-		let data = datatypes::gui::Alert {
+		let data = gui::Alert {
 			conn_id,
 			camera_id: alert.camera_id,
 			alert_code: alert.alert_code,
@@ -958,9 +955,9 @@ impl Server {
 
 	async fn force_retry_camera(
 		&mut self,
-		data: datatypes::gui::ForceRetryCamera,
+		data: gui::ForceRetryCamera,
 	) {
-		let send_data = datatypes::edge::ForceRetryCamera {
+		let send_data = edge::ForceRetryCamera {
 			camera_id: data.camera_id,
 		};
 		let msg = EdgeRequests::ForceRetryCamera(send_data);
@@ -972,7 +969,7 @@ impl Server {
 	}
 
 	async fn list_processing_types(&mut self, conn_id: ConnId) {
-		let data = datatypes::gui::ProcessingTypes::default();
+		let data = gui::ProcessingTypes::default();
 		let msg = GUIRequests::ProcessingTypes(data);
 		let send = &serde_json::to_string(&msg).unwrap();
 		let target = self.gui_sessions.get(&conn_id);
@@ -1178,7 +1175,7 @@ impl ServerHandle {
 	pub async fn register_cameras(
 		&self,
 		conn: ConnId,
-		cameras: HashMap<CameraId, datatypes::edge::NewCameraInfo>,
+		cameras: HashMap<CameraId, edge::NewCameraInfo>,
 	) {
 		self.cmd_tx
 			.send(Command::RegisterCameras { conn, cameras })
@@ -1188,7 +1185,7 @@ impl ServerHandle {
 	pub async fn update_camera_status(
 		&self,
 		conn: ConnId,
-		data: datatypes::edge::UpdateCameraStatus,
+		data: edge::UpdateCameraStatus,
 	) {
 		self.cmd_tx
 			.send(Command::UpdateCameraStatus { conn, data })
@@ -1198,14 +1195,14 @@ impl ServerHandle {
 	pub async fn image_analysis(
 		&self,
 		conn: ConnId,
-		analysis: datatypes::edge::ImageAnalysis,
+		analysis: edge::ImageAnalysis,
 	) {
 		self.cmd_tx
 			.send(Command::ImageAnalysis { conn, analysis })
 			.unwrap();
 	}
 
-	pub async fn setpoint(&self, target: Option<datatypes::gui::Setpoint>) {
+	pub async fn setpoint(&self, target: Option<gui::Setpoint>) {
 		self.cmd_tx.send(Command::Setpoint { target }).unwrap();
 	}
 
@@ -1213,7 +1210,7 @@ impl ServerHandle {
 		self.cmd_tx.send(Command::ListCameras { conn }).unwrap();
 	}
 
-	pub async fn set_name_camera(&self, data: datatypes::gui::SetNameCamera) {
+	pub async fn set_name_camera(&self, data: gui::SetNameCamera) {
 		self.cmd_tx
 			.send(Command::SetNameCamera {
 				conn: data.conn_id,
@@ -1223,14 +1220,14 @@ impl ServerHandle {
 			.unwrap();
 	}
 
-	pub async fn edge_camera_name_update(&self, conn: ConnId, data: datatypes::edge::SetNameCamera) {
+	pub async fn edge_camera_name_update(&self, conn: ConnId, data: edge::SetNameCamera) {
 		self.cmd_tx.send(Command::EdgeCameraNameUpdate { conn, data }).unwrap();
 	}
 
 	pub async fn start_viewing_camera(
 		&self,
 		conn: ConnId,
-		data: datatypes::gui::StartViewingCamera,
+		data: gui::StartViewingCamera,
 	) {
 		self.cmd_tx
 			.send(Command::StartViewingCamera {
@@ -1250,7 +1247,7 @@ impl ServerHandle {
 	pub async fn configuration(
 		&self,
 		conn: ConnId,
-		data: datatypes::shared::Configuration,
+		data: shared::Configuration,
 		side: WSSide,
 	) {
 		self.cmd_tx
@@ -1265,7 +1262,7 @@ impl ServerHandle {
 	pub async fn view_camera_config(
 		&self,
 		conn: ConnId,
-		data: datatypes::shared::ViewCameraConfig,
+		data: shared::ViewCameraConfig,
 	) {
 		self.cmd_tx
 			.send(Command::ViewCameraConfig { conn, camera: data })
@@ -1275,7 +1272,7 @@ impl ServerHandle {
 	pub async fn forget_camera(
 		&self,
 		conn: ConnId,
-		data: datatypes::shared::ForgetCameraRequest,
+		data: shared::ForgetCameraRequest,
 		side: WSSide,
 	) {
 		self.cmd_tx
@@ -1295,7 +1292,7 @@ impl ServerHandle {
 
 	pub async fn set_camera_thresholds(
 		&self,
-		data: datatypes::gui::SetCameraThresholds,
+		data: gui::SetCameraThresholds,
 	) {
 		self.cmd_tx
 			.send(Command::SetCameraThresholds { data })
@@ -1304,7 +1301,7 @@ impl ServerHandle {
 
 	pub async fn set_default_thresholds(
 		&self,
-		data: datatypes::gui::SetDefaultThreshold,
+		data: gui::SetDefaultThreshold,
 	) {
 		self.cmd_tx
 			.send(Command::SetDefaultThresholds { data })
@@ -1313,7 +1310,7 @@ impl ServerHandle {
 
 	pub async fn set_edge_processing_type(
 		&self,
-		data: datatypes::gui::SetEdgeProcessingType,
+		data: gui::SetEdgeProcessingType,
 	) {
 		self.cmd_tx
 			.send(Command::SetEdgeProcessingType { data })
@@ -1334,18 +1331,18 @@ impl ServerHandle {
 		self.cmd_tx.send(Command::ListDisconnectedEdges { conn }).unwrap();
 	}
 
-	pub async fn forget_edge(&self, data: datatypes::gui::ForgetEdge) {
+	pub async fn forget_edge(&self, data: gui::ForgetEdge) {
 		self.cmd_tx.send(Command::ForgetEdge { data }).unwrap();
 	}
 
-	pub async fn set_edge_name(&self, data: datatypes::gui::SetEdgeName) {
+	pub async fn set_edge_name(&self, data: gui::SetEdgeName) {
 		self.cmd_tx.send(Command::SetEdgeName { data }).unwrap();
 	}
 
 	pub async fn alert_from_edge(
 		&self,
 		conn: ConnId,
-		data: datatypes::edge::Alert,
+		data: edge::Alert,
 	) {
 		self.cmd_tx
 			.send(Command::AlertFromEdge { conn, data })
@@ -1354,7 +1351,7 @@ impl ServerHandle {
 
 	pub async fn alert_from_server(
 		&self,
-		data: datatypes::edge::Alert,
+		data: edge::Alert,
 		target: Option<ConnId>,
 	) {
 		self.cmd_tx
@@ -1364,7 +1361,7 @@ impl ServerHandle {
 
 	pub async fn force_retry_camera(
 		&self,
-		data: datatypes::gui::ForceRetryCamera,
+		data: gui::ForceRetryCamera,
 	) {
 		self.cmd_tx
 			.send(Command::ForceRetryCamera { data })

@@ -1,13 +1,13 @@
 use std::time::{Duration, Instant};
 
-use actix_ws::{AggregatedMessage, CloseCode, CloseReason, Message};
-use datatypes::shared::ConnId;
+use actix_ws::{AggregatedMessage, CloseCode, CloseReason};
 use futures_util::StreamExt as _;
-use serde::Serialize;
 use serde_json::Result;
-use server_edge_datatypes as datatypes;
-use server_edge_datatypes::edge::ServerRequests as EdgeServerRequests;
-use server_edge_datatypes::gui::ServerRequests as GUIServerRequests;
+use api::{
+	shared::ConnId,
+	edge::ServerRequests as EdgeServerRequests,
+	gui::ServerRequests as GUIServerRequests
+};
 use tokio::{sync::mpsc, time::interval};
 
 use crate::{ServerHandle, WSSide};
@@ -203,7 +203,7 @@ async fn initialise_edge_connection(
 
 	let msg = text.trim();
 	let data_unchecked =
-		serde_json::from_str::<datatypes::edge::ServerRequests>(&msg);
+		serde_json::from_str::<api::edge::ServerRequests>(&msg);
 	let Ok(command) = data_unchecked else {
 		eprintln!(
 			"Websocket stream received invalid text input while waiting for initialisation"
@@ -211,7 +211,7 @@ async fn initialise_edge_connection(
 		return None;
 	};
 
-	let datatypes::edge::ServerRequests::InitialiseConnection(data) = command
+	let api::edge::ServerRequests::InitialiseConnection(data) = command
 	else {
 		eprintln!(
 			"Websocket stream received invalid command while waiting for initialisation"

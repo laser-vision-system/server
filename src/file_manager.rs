@@ -10,8 +10,7 @@ use actix_web::{
 	HttpResponse,
 	http::{StatusCode, header::ContentType},
 };
-use server_edge_datatypes as datatypes;
-use server_edge_datatypes::edge::Settings;
+use api::edge::Settings;
 use tokio::sync::{mpsc, oneshot};
 use crate::server_persist_data::PersistentServerData;
 
