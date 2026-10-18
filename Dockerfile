@@ -7,7 +7,7 @@ RUN apt-get update && apt-get install -y clang
 
 COPY . .
 
-RUN cargo build --$BUILD_TARGET --bin server
+RUN cargo build --profile $BUILD_TARGET --bin server
 
 FROM --platform=$BUILDPLATFORM debian:bookworm-slim AS runtime
 RUN apt-get update && apt-get install -y ca-certificates
