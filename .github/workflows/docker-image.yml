@@ -8,7 +8,6 @@ on:
   push:
     branches:
       - 'main'
-      - 'dev'
     paths:
       - '**.rs'
       - 'Cargo.lock'
@@ -37,15 +36,19 @@ jobs:
           - os: ubuntu-22.04-arm
             arch: arm64
             build: dev
+            dir: debug
           - os: ubuntu-22.04
             arch: amd64
             build: release
+            dir: release
           - os: ubuntu-22.04-arm
             arch: arm64
             build: release
+            dir: release
           - os: ubuntu-22.04
             arch: amd64
             build: dev
+            dir: debug
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
@@ -76,7 +79,7 @@ jobs:
       - name: Build and push Docker image
         uses: docker/build-push-action@v4
         with:
-          build-args: BUILD_TARGET=${{ matrix.build }}
+          build-args: BUILD_TARGET=${{ matrix.build }} BINARY_DIR=${{ matrix.dir }}
           context: .
           push: true
           tags: ${{env.REGISTRY}}/${{env.IMAGE_NAME}}:${{matrix.arch}}-${{matrix.build}}-${{steps.meta.outputs.tags}}
