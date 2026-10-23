@@ -42,7 +42,7 @@ impl From<ShortCameraDetails> for CameraDetails {
 
 impl From<UniqueCameraID> for String {
     fn from(id: UniqueCameraID) -> Self {
-        serde_json::to_string(&id).unwrap()
+        serde_json::to_string(&id).expect("Could not serialize UniqueCameraID")
     }
 }
 

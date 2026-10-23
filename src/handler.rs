@@ -1,5 +1,5 @@
 use std::time::{Duration, Instant};
-
+use actix_web::web::Bytes;
 use actix_ws::{AggregatedMessage, CloseCode, CloseReason};
 use futures_util::StreamExt as _;
 use serde_json::Result;
@@ -10,14 +10,15 @@ use api::{
 };
 use tokio::{sync::mpsc, time::interval};
 
-use crate::{ServerHandle, WSSide};
+use crate::{server::server_handle::ServerHandle, Msg, WSSide};
 use rand::{self, RngExt as _};
+use tokio::time::Interval;
+use crate::error::{ServerError, ServerResult};
 
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(6);
 const CLIENT_TIMEOUT: Duration = Duration::from_secs(12);
 
-// generic websocket handler - can process both edge and GUI websockets,
-// although it may not be generic enough to handle images.
+/// generic websocket handler - can process both edge and GUI websockets,
 pub async fn ws_handler(
 	server: ServerHandle,
 	mut session: actix_ws::Session,
@@ -25,14 +26,14 @@ pub async fn ws_handler(
 	side: WSSide,
 ) {
 	let mut last_heartbeat = Instant::now();
-	let mut interval = interval(HEARTBEAT_INTERVAL);
+	let interval = interval(HEARTBEAT_INTERVAL);
 
 	let mut msg_stream = msg_stream
 		.max_frame_size(20 * 1024 * 1024)
 		.aggregate_continuations()
 		.max_continuation_size(2 * 1024 * 1024);
 
-	let (conn_tx, mut conn_rx) = mpsc::unbounded_channel();
+	let (conn_tx, conn_rx) = mpsc::unbounded_channel();
 
 	let (img_tx, mut img_rx) = mpsc::unbounded_channel();
 
@@ -85,95 +86,17 @@ pub async fn ws_handler(
 		},
 	}
 
-	let close_reason: Option<CloseReason> = loop {
-		tokio::select! { //waits for the first of the following events:
-			//handles incoming ws traffic
-			Some(Ok(msg)) = msg_stream.next() => {
-				match msg {
-					AggregatedMessage::Ping(bytes) => {
-						last_heartbeat = Instant::now();
-
-						//Not checking if the session is closed here because the chance of a ping being sent then the connection immediately closing is vanishingly unlikely
-						let _ = session.pong(&bytes).await;
-
-					}
-
-					AggregatedMessage::Pong(_) => {
-						last_heartbeat = Instant::now();
-					}
-
-					AggregatedMessage::Text(text) => {
-						last_heartbeat = Instant::now();
-						process_ws(&server, &text, conn_id, side)
-							.await;
-					}
-
-					AggregatedMessage::Binary(bin) => {
-						match side {
-							WSSide::GUI => {
-								break None
-							}
-
-							WSSide::Edge => {
-								server.route_image(conn_id, bin).await;
-							}
-						}
-					}
-
-					AggregatedMessage::Close(reason) => break reason,
-
-				}
-			}
-
-			//Sends any text input to the conn_tx sender back to the client
-			Some(chat_msg) = conn_rx.recv() => {
-				match side {
-					WSSide::GUI => {
-						println!("Sent to GUI: {chat_msg}");
-					}
-
-					WSSide::Edge => {
-						println!("Sent to Edge: {chat_msg}");
-					}
-				}
-				let closed = session.text(chat_msg).await;
-				if closed.is_err() {
-					break None;
-				}
-			}
-
-			Some(img_data) = img_rx.recv() => {
-				let closed = session.binary(img_data).await;
-				if closed.is_err() {
-					break None;
-				}
-			}
-
-			//keeps track of timeout conditions
-			_ = interval.tick() => {
-				if Instant::now().duration_since(last_heartbeat) > CLIENT_TIMEOUT {
-						match side {
-							WSSide::GUI => {
-								println!("GUI timed out: {conn_id}");
-							}
-
-							WSSide::Edge => {
-								println!("Edge timed out: {conn_id}");
-							}
-						}
-					break None;
-				}
-				let closed = session.ping(b"").await;
-				if closed.is_err() {
-					break None;
-				}
-			}
-
-			else => {
-				break None;
-			}
-		}
-	};
+	let close_reason: Option<CloseReason> = handle_loop(
+		&mut session,
+		&mut msg_stream,
+		&mut last_heartbeat,
+		side,
+		&server,
+		conn_id,
+		conn_rx,
+		img_rx,
+		interval
+	).await;
 
 	match side {
 		WSSide::GUI => {
@@ -188,6 +111,179 @@ pub async fn ws_handler(
 	server.disconnect(conn_id, side).await;
 
 	let _ = session.close(close_reason).await;
+}
+
+async fn handle_loop(
+	session: &mut actix_ws::Session,
+	msg_stream: &mut  actix_ws::AggregatedMessageStream,
+	last_heartbeat: &mut Instant,
+	side: WSSide,
+	server: &ServerHandle,
+	conn: ConnId,
+	mut conn_rx: mpsc::UnboundedReceiver<Msg>,
+	mut img_rx: mpsc::UnboundedReceiver<Bytes>,
+	mut interval: Interval,
+) -> Option<CloseReason> {
+	loop {
+		tokio::select! { //waits for the first of the following events:
+			//handles incoming ws traffic
+			Some(Ok(msg)) = msg_stream.next() => {
+				if let Err(err) = process_ws_request(
+					msg,
+					session,
+					last_heartbeat,
+					side,
+					&server,
+					conn,
+				).await {
+					match err {
+						ServerError::CloseConnection{ reason } => {
+							break reason;
+						}
+
+						_ => {}
+					}
+				}
+			}
+
+			//Sends any text input to the conn_tx sender back to the client
+			Some(chat_msg) = conn_rx.recv() => {
+				if let Err(err) = send_text(
+					session,
+					&*chat_msg,
+					side,
+				).await {
+					match err {
+						ServerError::CloseConnection{ reason } => {
+							break reason;
+						}
+
+						_ => {}
+					}
+				}
+			}
+
+			Some(img_data) = img_rx.recv() => {
+				let closed = session.binary(img_data).await;
+				if closed.is_err() {
+					break None;
+				}
+			}
+
+			//keeps track of timeout conditions
+			_ = interval.tick() => {
+				if let Err(err) = handle_tick(
+					session,
+					last_heartbeat,
+					side,
+					conn
+				).await {
+					match err {
+						ServerError::CloseConnection{ reason } => {
+							break reason;
+						}
+						_ => {}
+					}
+				}
+			}
+
+			else => {
+				break None;
+			}
+		}
+	}
+}
+
+async fn process_ws_request(
+	msg: AggregatedMessage,
+	session: &mut actix_ws::Session,
+	last_heartbeat: &mut Instant,
+	side: WSSide,
+	server: &ServerHandle,
+	conn: ConnId,
+) -> ServerResult<()> {
+	match msg {
+		AggregatedMessage::Ping(bytes) => {
+			*last_heartbeat = Instant::now();
+
+			//Not checking if the session is closed here because the chance of a ping being sent then the connection immediately closing is vanishingly unlikely
+			let _ = session.pong(&bytes).await;
+		}
+
+		AggregatedMessage::Pong(_) => {
+			*last_heartbeat = Instant::now();
+		}
+
+		AggregatedMessage::Text(text) => {
+			*last_heartbeat = Instant::now();
+			process_ws(&server, &text, conn, side)
+				.await;
+		}
+
+		AggregatedMessage::Binary(bin) => {
+			match side {
+				WSSide::GUI => {
+					return Err(ServerError::CloseConnection { reason: None})
+				}
+
+				WSSide::Edge => {
+					server.route_image(conn, bin).await;
+				}
+			}
+		}
+		AggregatedMessage::Close(reason) =>
+			return Err(ServerError::CloseConnection {reason}),
+	}
+
+	Ok(())
+}
+
+async fn send_text(
+	session: &mut actix_ws::Session,
+	chat_msg: &str,
+	side: WSSide
+) -> ServerResult<()> {
+	match side {
+		WSSide::GUI => {
+			println!("Sent to GUI: {chat_msg}");
+		}
+
+		WSSide::Edge => {
+			println!("Sent to Edge: {chat_msg}");
+		}
+	}
+	let closed = session.text(chat_msg).await;
+	if closed.is_err() {
+		return Err(ServerError::CloseConnection {reason: None})
+	}
+
+	Ok(())
+}
+
+async fn handle_tick(
+	session: &mut actix_ws::Session,
+	last_heartbeat: &mut Instant,
+	side: WSSide,
+	conn: ConnId,
+) -> ServerResult<()> {
+	if Instant::now().duration_since(*last_heartbeat) > CLIENT_TIMEOUT {
+		match side {
+			WSSide::GUI => {
+				println!("GUI timed out: {conn}");
+			}
+
+			WSSide::Edge => {
+				println!("Edge timed out: {conn}");
+			}
+		}
+		return Err(ServerError::CloseConnection {reason: None})
+	}
+	let closed = session.ping(b"").await;
+	if closed.is_err() {
+		return Err(ServerError::CloseConnection {reason: None})
+	}
+
+	Ok(())
 }
 
 async fn initialise_edge_connection(
@@ -247,13 +343,20 @@ async fn gui_process(server: &ServerHandle, text: &str, conn: ConnId) {
 
 	let data_unchecked: Result<GUIServerRequests> = serde_json::from_str(msg);
 
-	let Ok(data) = data_unchecked else {
-		eprintln!(
-			"Message could not deserialized due to: {:?}",
-			data_unchecked.err().unwrap().to_string()
-		);
-		return;
-	};
+	let data;
+	match data_unchecked {
+		Ok(value) => {
+			data = value;
+		}
+
+		Err(e) => {
+			eprintln!(
+				"Message could not deserialized due to: {:?}",
+				e.to_string()
+			);
+			return;
+		}
+	}
 
 	match data {
 		GUIServerRequests::ListEdges => server.list_edges(conn).await,
@@ -333,13 +436,20 @@ async fn edge_process(server: &ServerHandle, text: &str, conn: ConnId) {
 
 	let data_unchecked: Result<EdgeServerRequests> = serde_json::from_str(msg);
 
-	let Ok(data) = data_unchecked else {
-		eprintln!(
-			"Message could not deserialized due to: {:?}",
-			data_unchecked.err().unwrap().to_string()
-		);
-		return;
-	};
+	let data;
+	match data_unchecked {
+		Ok(value) => {
+			data = value;
+		}
+
+		Err(e) => {
+			eprintln!(
+				"Message could not deserialized due to: {:?}",
+				e.to_string()
+			);
+			return;
+		}
+	}
 
 	match data {
 		EdgeServerRequests::InitialiseConnection(_) => {
