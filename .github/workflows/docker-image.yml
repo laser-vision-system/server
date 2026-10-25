@@ -74,7 +74,7 @@ jobs:
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          password: ${{ secrets.DOCKER_GH_AUTO_AUTH_KEY }}
 
       - name: Build and push Docker image
         uses: docker/build-push-action@v4
@@ -89,5 +89,5 @@ jobs:
           platforms: linux/${{ matrix.arch }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
-          github-token: ${{secrets.GITHUB_TOKEN}}
+          github-token: ${{secrets.DOCKER_GH_AUTO_AUTH_KEY}}
           
