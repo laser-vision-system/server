@@ -3,6 +3,7 @@ mod handler;
 mod restful;
 mod server;
 mod server_persist_data;
+pub mod error;
 
 use std::io;
 
@@ -12,7 +13,7 @@ use tokio::{
 	try_join,
 };
 
-use self::server::{Server, ServerHandle};
+use self::server::{Server, server_handle::ServerHandle};
 use crate::file_manager::FileManager;
 
 pub type Msg = String;
