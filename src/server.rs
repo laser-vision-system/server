@@ -650,6 +650,21 @@ impl Server {
 		let camera_id: CameraId = CameraId::from_be_bytes(buf);
 
 		if !self.camera_in_use(conn_id, camera_id) {
+			// If the edge is sending images for cameras not being viewed, tell it to stop.
+			if self.cameras.contains_key(&UniqueCameraID{
+				conn: conn_id,
+				camera: camera_id
+			}) {
+				if let Some(edge) = self.edge_sessions.get(&conn_id) {
+					let send = edge::ToggleViewingCamera{
+						camera_id,
+						start_viewing: false
+					};
+					let msg = serde_json::to_string(&EdgeRequests::ToggleViewingCamera(send))
+						.expect("Could not serialize Edge request");
+					let _ = edge.send(msg);
+				}
+			}
 			return;
 		}
 
