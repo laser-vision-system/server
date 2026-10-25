@@ -1,7 +1,9 @@
 use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
-use server_edge_datatypes::gui::CameraDetails;
-use server_edge_datatypes::shared::{CameraId, CameraStatus, ConnId, Deviation};
+use api::{
+    gui::CameraDetails,
+    shared::{CameraStatus, ConnId, Deviation}
+};
 use crate::server::UniqueCameraID;
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -40,7 +42,7 @@ impl From<ShortCameraDetails> for CameraDetails {
 
 impl From<UniqueCameraID> for String {
     fn from(id: UniqueCameraID) -> Self {
-        serde_json::to_string(&id).unwrap()
+        serde_json::to_string(&id).expect("Could not serialize UniqueCameraID")
     }
 }
 

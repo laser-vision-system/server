@@ -16,26 +16,32 @@ env_logger = "0.11.10"
 rand = "0.10.1"
 api = { path = "./api"}
 serde_json = "1.0.149"
+thiserror = "2.0.21"
 
 [lints.rust]
 unsafe_code = "deny" # We should avoid using unsafe code as much as possible.
+missing_docs = "deny" # Make sure to include documentation.
 
 [lints.rustdoc]
-missing_crate_level_docs = "warn"
-broken_intra_doc_links = "warn"
+missing_crate_level_docs = "deny" # The crate-level docs should give a brief overview.
+broken_intra_doc_links = "deny" # All links should be correct.
 
 [lints.clippy]
 
+tabs_in_doc_comments = "allow" # Tabs expected for indentation.
+
 # ===== pedantic group lints ======
-pedantic = { level = "warn", priority = -1} # This should be upgraded to forbid in the future.
-missing_errors_doc = "allow" # Consider upgrading in the future.
-missing_panics_doc = "allow" # Consider upgrading in the future.
+
+pedantic = { level = "deny", priority = -1 }
 must_use_candidate = "allow" # We don't need to be constantly alerted to this.
+missing_errors_doc = "deny" # Documentation should be thorough.
+missing_panics_doc = "deny" # Documentation should be thorough.
 
 # ===== restriction group lints ======
 
 # Allowed
 
+absolute_paths = "allow" # This is for external crate paths, not file paths.
 arithmetic_side_effects = "allow" # TODO: Upgrade in future?
 as_underscore = "allow" # Consider upgrading.
 clone_on_ref_ptr = "allow" # Okay as long as you are aware.
@@ -43,10 +49,11 @@ default_numeric_fallback = "allow" # Doesn't solve any problems and just adds fl
 exhaustive_enums = "allow" # TODO: Check if this is only for public enums.
 exhaustive_structs = "allow" # TODO: Check if this is only for public enums.
 implicit_return = "allow" # You are encouraged to omit `return`.
+impl_trait_in_params = "allow" # `impl Trait` hides from turbofish (`::<>`) which can be useful in some scenarios. Think of it like an anonymouse generic type.
 inline_modules = "allow" # Currently complains about inline test modules.
 iter_over_hash_type = "allow" # We do not care about order.
 let_underscore_untyped = "allow" # Overlaps with `let_underscore_must_use`, little other value added.
-missing_docs_in_private_items = "allow" # TODO: Upgrade in the future.
+missing_docs_in_private_items = "allow" # This includes private fields; it would be overkill.
 missing_inline_in_public_items = "allow" # TODO: Maybe upgrade in the future for performance.
 module_name_repetitions = "allow" # Doesn't seem to help, often forces dumb renaming.
 multiple_inherent_impl = "allow" # This is fine in a single file, but discouraged across different files.
@@ -56,7 +63,6 @@ pattern_type_mismatch = "allow" # Encourages good ownership understanding, but a
 
 # Warn
 
-absolute_paths = "warn" # Encourage the use of relative paths without expressly denying it. This is for external crates, not file paths.
 allow_attributes = "warn" # Encourage the use of `#[except]`.
 assertions_on_result_states = "warn" # Please mark when you intend to do this.
 decimal_literal_representation = "warn" # May help readability.
@@ -66,6 +72,7 @@ empty_structs_with_brackets = "warn" # Helps readability, but could be a breakin
 expect_used = "warn" # Expect should be used as sparingly as possible.
 filetype_is_file = "warn" # Encourage using `!is_dir()` instead.
 if_then_some_else_none = "warn" # Encourages a simpler pattern.
+inline_trait_bounds = "warn" # Do not use inline bounds when there is more than one generic parameter.
 let_underscore_must_use = "warn" # Do not discard these types. # TODO: Upgrade in the future.
 lossy_float_literal = "warn" # Alerts to potential issues.
 map_err_ignore = "warn" # Will cause a loss of error details. # TODO: Upgrade in the future.
@@ -102,12 +109,10 @@ float_cmp_const = "deny" # Comparing floats directly can lead to subtle errors.
 fn_to_numeric_cast_any = "deny" # You definitely do not need to do this. Not forbidden only to allow clap derive.
 get_unwrap = "deny" # This is just a worse version of index access (`[]`). Not forbidden only to allow clap derive.
 host_endian_bytes = "deny" # You should not be doing this.
-impl_trait_in_params = "deny" # `impl Trait` prevents turbofish (`::<>`) and may hurt readability.
 indexing_slicing = "deny" # Can cause a panic when used.
 infinite_loop = "deny" # Require an explicit return type for this.
 inline_asm_x86_att_syntax = "deny" # No ASM. Not forbidden only to allow clap derive.
 inline_asm_x86_intel_syntax = "deny" # No ASM. Not forbidden only to allow clap derive.
-inline_trait_bounds = "deny" # Enforcing a consistent style.
 integer_division = "deny" # Force a justification for why this is done.
 large_include_file = "deny" # You should not be doing this.
 little_endian_bytes = "deny" # You should not be doing this.
@@ -142,7 +147,7 @@ unneeded_field_pattern = "deny" # Enforce a justification.
 unreachable = "deny" # Enforce a justification.
 unused_result_ok = "deny" # Prevents silencing potential errors.
 unwrap_in_result = "deny" # Enforce a justification.
-unwrap_used = "deny" # Enforce a justification. #TODO: Upgrade in the future.
+unwrap_used = "deny" # Enforce a justification. Not forbidden to avoid issues with external macros.
 verbose_file_reads = "deny" # Inferior to `fs::read`.
 
 # Forbid

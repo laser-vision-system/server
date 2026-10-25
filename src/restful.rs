@@ -1,5 +1,5 @@
-use actix_web::{HttpResponse, Responder, get, post, web};
-use server_edge_datatypes as datatypes;
+	use actix_web::{HttpResponse, Responder, get, post, web};
+use api::restful;
 
 use crate::file_manager::{FileManagerHandle, fill_response};
 
@@ -22,7 +22,7 @@ async fn default_config(
 #[post("/write_default_config")]
 async fn write_default_config(
 	file_manager: web::Data<FileManagerHandle>,
-	json: web::Json<datatypes::restful::Config>,
+	json: web::Json<restful::Config>,
 ) -> impl Responder {
 	let response = file_manager.change_default_config(json.settings.clone()).await;
 	fill_response(response)
@@ -31,7 +31,7 @@ async fn write_default_config(
 #[post("/edge_logs")]
 async fn edge_logs(
 	file_manager: web::Data<FileManagerHandle>,
-	json: web::Json<datatypes::restful::Logs>,
+	json: web::Json<restful::Logs>,
 ) -> impl Responder {
 	let response = file_manager.write_edge_logs(json.logs.clone()).await;
 	fill_response(response)

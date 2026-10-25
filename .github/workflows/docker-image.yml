@@ -8,13 +8,10 @@ on:
   push:
     branches:
       - 'main'
-      - 'dev'
-      - 'feat/docker-automated-workflow'
     paths:
       - '**.rs'
       - 'Cargo.lock'
       - 'Dockerfile'
-      - 'docker-image.yml'
       - ...
 
 env:
@@ -38,24 +35,35 @@ jobs:
         include:
           - os: ubuntu-22.04-arm
             arch: arm64
+            build: dev
+            dir: debug
           - os: ubuntu-22.04
             arch: amd64
+            build: release
+            dir: release
+          - os: ubuntu-22.04-arm
+            arch: arm64
+            build: release
+            dir: release
+          - os: ubuntu-22.04
+            arch: amd64
+            build: dev
+            dir: debug
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
         with:
-          submodules: recursive
-          token: ${{ secrets.DOCKER_GH_AUTO_AUTH_KEY }}
+           submodules: recursive
+           token: ${{ secrets.DOCKER_GH_AUTO_AUTH_KEY }}
 
       - name: Extract metadata
         id: meta
         uses: docker/metadata-action@v6
         with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-${{ matrix.arch }}
           tags: |
-            type=ref,event=branch
-            type=raw,value=stable,enable={{is_default_branch}}
-            type=schedule,pattern={{date 'YYYY-MM-DD'}}
+              type=ref,event=branch
+              type=raw,value=stable,enable={{is_default_branch}}
+              type=schedule,pattern={{date 'YYYY-MM-DD'}}
 
       - uses: actions/checkout@v4.2.2
       - name: configure docker builder
@@ -71,10 +79,12 @@ jobs:
       - name: Build and push Docker image
         uses: docker/build-push-action@v4
         with:
+          build-args: BUILD_TARGET=${{ matrix.build }} BINARY_DIR=${{ matrix.dir }}
           context: .
           push: true
-          tags: ${{ steps.meta.outputs.tags }}
+          tags: ${{env.REGISTRY}}/${{env.IMAGE_NAME}}:${{matrix.arch}}-${{matrix.build}}-${{steps.meta.outputs.tags}}
           builder: container-builder
           platforms: linux/${{ matrix.arch }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+          

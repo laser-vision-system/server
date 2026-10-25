@@ -10,8 +10,7 @@ use actix_web::{
 	HttpResponse,
 	http::{StatusCode, header::ContentType},
 };
-use server_edge_datatypes as datatypes;
-use server_edge_datatypes::edge::Settings;
+use api::edge::Settings;
 use tokio::sync::{mpsc, oneshot};
 use crate::server_persist_data::PersistentServerData;
 
@@ -63,10 +62,10 @@ fn error_response(result: Error) -> SafeHttpResponse {
 }
 
 pub fn fill_response(unformatted: SafeHttpResponse) -> HttpResponse {
-	if unformatted.reason.is_some() {
+	if let Some(reason) = unformatted.reason {
 		return HttpResponse::build(unformatted.code)
-			.reason(unformatted.reason.unwrap())
-			.finish();
+			.reason(reason)
+			.finish()
 	}
 
 	if unformatted.body.is_none() {
@@ -74,14 +73,23 @@ pub fn fill_response(unformatted: SafeHttpResponse) -> HttpResponse {
 	}
 
 	if unformatted.json {
-		return HttpResponse::Ok()
-			.content_type(ContentType::json())
-			.body(unformatted.body.unwrap());
+		return if let Some(body) = unformatted.body {
+			HttpResponse::Ok()
+				.content_type(ContentType::json())
+				.body(body)
+		} else {
+			HttpResponse::build(unformatted.code)
+				.finish()
+		}
 	}
 
-	HttpResponse::build(unformatted.code)
-		.content_type(ContentType::plaintext())
-		.body(unformatted.body.unwrap())
+	if let Some(body) = unformatted.body {
+		return HttpResponse::build(unformatted.code)
+			.content_type(ContentType::plaintext())
+			.body(body)
+	}
+
+	HttpResponse::build(unformatted.code).finish()
 }
 
 #[derive(Debug)]
@@ -138,7 +146,7 @@ impl FileManager {
 			return result;
 		}
 
-		let config = serde_json::to_string(&Settings::default()).unwrap();
+		let config = serde_json::to_string(&Settings::default()).expect("Unable to serialize Settings");
 
 		SafeHttpResponse {
 			code: StatusCode::OK,
@@ -194,10 +202,15 @@ impl FileManager {
 			.truncate(true)
 			.open(path);
 
-		if check_file.is_err() {
-			return error_response(check_file.err().unwrap());
+		let mut file;
+		match check_file {
+			Ok(value) => {
+				file = value;
+			}
+			Err(err) => {
+				return error_response(err);
+			}
 		}
-		let mut file = check_file.unwrap();
 
 		let Ok(write_settings) = serde_json::to_string(&json) else{
 			return SafeHttpResponse {
@@ -224,11 +237,17 @@ impl FileManager {
 	) -> SafeHttpResponse {
 		let path = Path::new(EDGE_LOGS);
 		let check_file = File::options().append(true).create(true).open(path);
-		if check_file.is_err() {
-			return error_response(check_file.err().unwrap());
+
+		let mut file;
+		match check_file {
+			Ok(value) => {
+				file = value;
+			}
+			Err(err) => {
+				return error_response(err);
+			}
 		}
 
-		let mut file = check_file.unwrap();
 		for log in logs {
 			let _result = writeln!(file, "{log}");
 		}
@@ -248,17 +267,25 @@ impl FileManager {
 			.write(true)
 			.truncate(true)
 			.open(path);
-		if check_file.is_err() {
-			eprintln!{"Could not open server_state.json due to: {:?}", check_file.err().unwrap()};
-			return;
+
+		let mut file;
+		match check_file {
+			Ok(value) => {
+				file = value;
+			}
+			Err(err) => {
+				eprintln!{"Could not open server_state.json due to: {:?}", err};
+				return
+			}
 		}
 
-		let mut file = check_file.unwrap();
-		let json = serde_json::to_string(&state).unwrap();
+		let json = serde_json::to_string(&state).expect("Unable to serialize PersistentServerData");
 		let result = writeln!(&mut file, "{json}");
-		if result.is_err() {
-			eprintln!{"Could not write to server_state.json due to: {:?}", result.err().unwrap()};
+
+		if let Err(err) = result {
+			eprintln!{"Could not write to server_state.json due to: {:?}", err};
 		}
+
 		return;
 	}
 
@@ -266,28 +293,37 @@ impl FileManager {
 		let path = Path::new(SERVER_STATE);
 		let check_file = File::options().read(true).open(path);
 
-		if check_file.is_err() {
-			eprintln!{"Could not open server_state.json due to: {:?}", check_file.err().unwrap()};
-			return PersistentServerData::default()
+		let mut file;
+		match check_file {
+			Ok(value) => {
+				file = value;
+			}
+			Err(err) => {
+				eprintln!{"Could not open server_state.json due to: {:?}", err};
+				return PersistentServerData::default()
+			}
 		}
 
-		let mut file = check_file.unwrap();
+
 		let mut body: String = String::new();
 		let result = file.read_to_string(&mut body);
 
-		if result.is_err() {
-			eprintln!("Could not read server_state.json due to: {:?}", result.err().unwrap());
+		if let Err(err) =  result {
+			eprintln!("Could not read server_state.json due to: {:?}", err);
 			return PersistentServerData::default()
 		}
 
 		let data = serde_json::from_str::<PersistentServerData>(&body);
 
-		if data.is_err() {
-			eprintln!("Could not parse server_state.json due to: {:?}", result.err());
-			return PersistentServerData::default();
+		return match data {
+			Ok(data) => {
+				data
+			}
+			Err(err) => {
+				eprintln!("Could not parse server_state.json due to: {:?}", err);
+				PersistentServerData::default()
+			}
 		}
-
-		return data.unwrap();
 	}
 
 	pub async fn run(mut self) -> io::Result<()> {
@@ -332,9 +368,11 @@ impl FileManagerHandle {
 	pub async fn get_default_config(&self) -> SafeHttpResponse {
 		let (tx, rx) = oneshot::channel();
 
-		self.cmd_tx.send(Command::GetDefaultConfig { tx }).unwrap();
+		self.cmd_tx
+			.send(Command::GetDefaultConfig { tx })
+			.expect("File manager thread closed");
 
-		rx.await.unwrap()
+		rx.await.expect("Failed to receive response")
 	}
 
 	pub async fn change_default_config(
@@ -345,9 +383,9 @@ impl FileManagerHandle {
 
 		self.cmd_tx
 			.send(Command::WriteDefaultConfig { tx, settings })
-			.unwrap();
+			.expect("File manager thread closed");
 
-		rx.await.unwrap()
+		rx.await.expect("Failed to receive response")
 	}
 
 	pub async fn write_edge_logs(
@@ -358,20 +396,24 @@ impl FileManagerHandle {
 
 		self.cmd_tx
 			.send(Command::WriteEdgeLogs { tx, logs })
-			.unwrap();
+			.expect("File manager thread closed");
 
-		rx.await.unwrap()
+		rx.await.expect("Failed to receive response")
 	}
 
 	pub async fn save_server_state(&self, state: PersistentServerData) {
-		self.cmd_tx.send(Command::SaveServerState { state }).unwrap();
+		self.cmd_tx
+			.send(Command::SaveServerState { state })
+			.expect("File manager thread closed");
 	}
 
 	pub async fn load_server_state(&self) -> PersistentServerData {
 		let (tx, rx) = oneshot::channel();
 
-		self.cmd_tx.send(Command::LoadServerState { tx }).unwrap();
+		self.cmd_tx
+			.send(Command::LoadServerState { tx })
+			.expect("File manager thread closed");
 
-		rx.await.unwrap()
+		rx.await.expect("Failed to receive response")
 	}
 }
