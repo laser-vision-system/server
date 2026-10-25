@@ -54,7 +54,7 @@ jobs:
         uses: actions/checkout@v4
         with:
            submodules: recursive
-           token: ${{ secrets.DOCKER_GH_AUTO_AUTH_KEY }}
+           token: ${{secrets.GITHUB_TOKEN}}
 
       - name: Extract metadata
         id: meta
@@ -89,4 +89,5 @@ jobs:
           platforms: linux/${{ matrix.arch }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
-        
+          github-token: ${{secrets.GITHUB_TOKEN}}
+          
