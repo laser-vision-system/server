@@ -6,6 +6,8 @@ use api::shared::{CameraId, ConnId};
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::oneshot;
 use crate::{Msg, WSSide};
+use crate::error::ServerResult;
+use crate::server::Server;
 
 #[derive(Debug, Clone)]
 pub struct ServerHandle {
@@ -43,6 +45,18 @@ impl ServerHandle {
         self.cmd_tx
             .send(Command::Disconnect { conn, side })
             .expect("Server thread closed");
+    }
+
+    pub async fn get_edge_name(&self, conn_id: ConnId) -> ServerResult<String> {
+        let (res_tx, res_rx) = oneshot::channel();
+        self.cmd_tx
+            .send(Command::GetEdgeName {
+                res_tx,
+                conn_id,
+            })
+            .expect("Server thread closed");;
+
+        res_rx.await.expect("Failed to receive response")
     }
 
     pub async fn register_cameras(

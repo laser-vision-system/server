@@ -19,6 +19,7 @@ use tokio::sync::{mpsc, mpsc::UnboundedSender};
 use tokio::time::interval;
 use crate::WSSide::Edge;
 use crate::{Msg, WSSide};
+use crate::error::{ServerError, ServerResult};
 use crate::file_manager::FileManagerHandle;
 use crate::server::server_handle::ServerHandle;
 use crate::server_persist_data::{PersistentServerData, ShortCameraDetails};
@@ -142,7 +143,6 @@ impl Server {
 
 				for camera in self.cameras.keys() {
 					if camera.conn == conn_id {
-						println!("disconnecting camera {}", camera.camera);
 						cameras.insert(<(ConnId, CameraId)>::from(*camera));
 					}
 				}
@@ -161,6 +161,13 @@ impl Server {
 				self.gui_img_route.remove(&conn_id);
 			},
 		}
+	}
+
+	fn get_edge_name(&mut self, conn_id: ConnId) -> ServerResult<String> {
+		self.edge_names
+			.get(&conn_id)
+			.cloned()
+			.ok_or_else(|| {ServerError::EdgeIdNotFound})
 	}
 
 	fn is_connected(&self, conn_id: ConnId, camera: CameraId) -> bool {
@@ -934,6 +941,11 @@ impl Server {
 						Command::Disconnect { conn, side } => {
 							self.disconnect(conn, side).await;
 						},
+
+						Command::GetEdgeName { res_tx, conn_id} => {
+							let result = self.get_edge_name(conn_id);
+							let _ = res_tx.send(result);
+						}
 		
 						Command::RegisterCameras { conn, cameras } => {
 							self.register_cameras(conn, cameras).await;

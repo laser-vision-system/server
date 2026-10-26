@@ -14,6 +14,7 @@ use crate::{server::server_handle::ServerHandle, Msg, WSSide};
 use rand::{self, RngExt as _};
 use tokio::time::Interval;
 use crate::error::{ServerError, ServerResult};
+use crate::logger::logger;
 
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(6);
 const CLIENT_TIMEOUT: Duration = Duration::from_secs(12);
@@ -66,7 +67,7 @@ pub async fn ws_handler(
 	};
 
 	if !server.connect(conn_tx, conn_id, side, send_img_tx).await {
-		eprintln!("Invalid edge ID");
+		logger().log_warn("Edge ID already in use");
 		let _ = session.close(Some(CloseReason {
 			code: CloseCode::Invalid,
 			description: Some(
@@ -78,11 +79,11 @@ pub async fn ws_handler(
 
 	match side {
 		WSSide::GUI => {
-			println!("GUI connected: {conn_id}");
+			logger().log_info("GUI connected: {conn_id}");
 		},
 
 		WSSide::Edge => {
-			println!("Edge connected: {conn_id}");
+			logger().log_info("Edge connected: {conn_id}");
 		},
 	}
 
@@ -100,11 +101,11 @@ pub async fn ws_handler(
 
 	match side {
 		WSSide::GUI => {
-			println!("GUI disconnected: {conn_id}");
+			logger().log_info("GUI disconnected: {conn_id}");
 		},
 
 		WSSide::Edge => {
-			println!("Edge disconnected: {conn_id}");
+			logger().log_info("Edge disconnected: {conn_id}");
 		},
 	}
 
@@ -245,10 +246,12 @@ async fn send_text(
 ) -> ServerResult<()> {
 	match side {
 		WSSide::GUI => {
+			#[cfg(debug_assertions)]
 			println!("Sent to GUI: {chat_msg}");
 		}
 
 		WSSide::Edge => {
+			#[cfg(debug_assertions)]
 			println!("Sent to Edge: {chat_msg}");
 		}
 	}
@@ -269,11 +272,11 @@ async fn handle_tick(
 	if Instant::now().duration_since(*last_heartbeat) > CLIENT_TIMEOUT {
 		match side {
 			WSSide::GUI => {
-				println!("GUI timed out: {conn}");
+				logger().log_info("GUI timed out: {conn}");
 			}
 
 			WSSide::Edge => {
-				println!("Edge timed out: {conn}");
+				logger().log_info("Edge timed out: {conn}");
 			}
 		}
 		return Err(ServerError::CloseConnection {reason: None})
@@ -291,7 +294,7 @@ async fn initialise_edge_connection(
 ) -> Option<ConnId> {
 	let Some(Ok(AggregatedMessage::Text(text))) = msg_stream.next().await
 	else {
-		eprintln!(
+		logger().log_warn(
 			"Websocket stream received invalid input while waiting for initialisation"
 		);
 		return None;
@@ -301,7 +304,7 @@ async fn initialise_edge_connection(
 	let data_unchecked =
 		serde_json::from_str::<api::edge::ServerRequests>(&msg);
 	let Ok(command) = data_unchecked else {
-		eprintln!(
+		logger().log_warn(
 			"Websocket stream received invalid text input while waiting for initialisation"
 		);
 		return None;
@@ -309,7 +312,7 @@ async fn initialise_edge_connection(
 
 	let api::edge::ServerRequests::InitialiseConnection(data) = command
 	else {
-		eprintln!(
+		logger().log_warn(
 			"Websocket stream received invalid command while waiting for initialisation"
 		);
 		return None;
@@ -339,6 +342,7 @@ async fn gui_process(server: &ServerHandle, text: &str, conn: ConnId) {
 		return;
 	}
 
+	#[cfg(debug_assertions)]
 	println!("Received from GUI: {msg}");
 
 	let data_unchecked: Result<GUIServerRequests> = serde_json::from_str(msg);
@@ -350,9 +354,10 @@ async fn gui_process(server: &ServerHandle, text: &str, conn: ConnId) {
 		}
 
 		Err(e) => {
-			eprintln!(
+			logger().log_warn(
+				format!(
 				"Message could not deserialized due to: {:?}",
-				e.to_string()
+				e.to_string()).as_str()
 			);
 			return;
 		}
@@ -424,7 +429,7 @@ async fn gui_process(server: &ServerHandle, text: &str, conn: ConnId) {
 		},
 
 		_ => {
-			eprintln!("Message not recognised");
+			logger().log_warn("Received unrecognized GUI command");
 		},
 	}
 }
@@ -432,6 +437,7 @@ async fn gui_process(server: &ServerHandle, text: &str, conn: ConnId) {
 async fn edge_process(server: &ServerHandle, text: &str, conn: ConnId) {
 	let msg = text.trim();
 
+	#[cfg(debug_assertions)]
 	println!("Received from Edge: {msg}");
 
 	let data_unchecked: Result<EdgeServerRequests> = serde_json::from_str(msg);
@@ -443,21 +449,17 @@ async fn edge_process(server: &ServerHandle, text: &str, conn: ConnId) {
 		}
 
 		Err(e) => {
-			eprintln!(
-				"Message could not deserialized due to: {:?}",
-				e.to_string()
+			logger().log_warn(
+				format!(
+					"Message could not deserialized due to: {:?}",
+					e.to_string()).as_str()
 			);
 			return;
 		}
 	}
 
 	match data {
-		EdgeServerRequests::InitialiseConnection(_) => {
-			eprintln!(
-				"Already initialised connection tried initialising: {:?}",
-				conn
-			);
-		},
+		EdgeServerRequests::InitialiseConnection(_) => {},
 
 		EdgeServerRequests::RegisterCameras(data) => {
 			server.register_cameras(conn, data.cameras).await
@@ -488,7 +490,7 @@ async fn edge_process(server: &ServerHandle, text: &str, conn: ConnId) {
 		},
 
 		_ => {
-			eprintln!("Message not recognised");
+			logger().log_warn("Received unrecognized Edge command");
 		},
 	}
 }

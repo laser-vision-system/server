@@ -5,6 +5,7 @@ use api::shared::{CameraId, ConnId};
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::oneshot;
 use crate::{Msg, WSSide};
+use crate::error::ServerResult;
 
 #[derive(Debug)]
 pub enum Command {
@@ -19,6 +20,11 @@ pub enum Command {
     Disconnect {
         conn: ConnId,
         side: WSSide,
+    },
+
+    GetEdgeName {
+        res_tx: oneshot::Sender<ServerResult<String>>,
+        conn_id: ConnId,
     },
 
     RegisterCameras {
