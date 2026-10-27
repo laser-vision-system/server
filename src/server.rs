@@ -416,8 +416,8 @@ impl Server {
 			state: old_camera_data.state,
 			warn_below_threshold: old_camera_data.warn_below_threshold,
 			warn_above_threshold: old_camera_data.warn_above_threshold,
-			alert_above_threshold: old_camera_data.warn_below_threshold,
-			alert_below_threshold: old_camera_data.warn_below_threshold
+			alert_above_threshold: old_camera_data.alert_above_threshold,
+			alert_below_threshold: old_camera_data.alert_below_threshold
 		};
 
 		self.cameras.insert(camera_id, new_camera_data);
