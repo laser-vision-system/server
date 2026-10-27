@@ -1,17 +1,18 @@
 use std::{
-	collections::HashSet,
 	fs::File,
 	io,
 	io::{Error, ErrorKind, Read as _, Write as _},
 	path::Path,
 };
-
+use std::fs::rename;
 use actix_web::{
 	HttpResponse,
 	http::{StatusCode, header::ContentType},
 };
 use api::edge::Settings;
+use api::shared::ConnId;
 use tokio::sync::{mpsc, oneshot};
+use crate::logger::logger;
 use crate::server_persist_data::PersistentServerData;
 
 #[derive(Debug)]
@@ -34,6 +35,11 @@ const CONTENT_FOLDER: &str = "content";
 
 const DEFAULT_CONFIG: &str = "./content/default_config.json";
 const EDGE_LOGS: &str = "./content/edge.log";
+const EDGE_OLD_LOGS: &str = "./content/edge.old.log";
+const SERVER_LOGS: &str = "./content/server.log";
+const SERVER_OLD_LOGS: &str = "./content/server.old.log";
+const MAX_LOG_SIZE: u64 = 1024 * 50;
+
 const SERVER_STATE: &str =  "./content/server_state.json";
 
 fn error_response(result: Error) -> SafeHttpResponse {
@@ -105,7 +111,12 @@ enum Command {
 
 	WriteEdgeLogs {
 		tx: oneshot::Sender<SafeHttpResponse>,
-		logs: HashSet<String>,
+		conn_id: ConnId,
+		logs: Vec<String>,
+	},
+
+	WriteServerLogs {
+		logs: Vec<String>
 	},
 
 	SaveServerState {
@@ -126,6 +137,7 @@ impl FileManager {
 	pub fn new() -> (Self, FileManagerHandle) {
 		Self::assert_content_folder();
 		let (tx, rx) = mpsc::unbounded_channel();
+		logger().init_filesystem(FileManagerHandle {cmd_tx: tx.clone()});
 		(Self { cmd_rx: rx }, FileManagerHandle { cmd_tx: tx })
 	}
 	
@@ -135,7 +147,7 @@ impl FileManager {
 			return
 		}
 		eprintln!("Could not create content folder!");
-		panic!();
+		panic!("Could not create content folder!");
 	}
 
 	async fn init_default_config(&mut self) -> SafeHttpResponse {
@@ -233,7 +245,8 @@ impl FileManager {
 
 	async fn write_edge_logs(
 		&mut self,
-		logs: HashSet<String>,
+		conn_id: ConnId,
+		logs: Vec<String>,
 	) -> SafeHttpResponse {
 		let path = Path::new(EDGE_LOGS);
 		let check_file = File::options().append(true).create(true).open(path);
@@ -249,14 +262,69 @@ impl FileManager {
 		}
 
 		for log in logs {
-			let _result = writeln!(file, "{log}");
+			let _result = writeln!(file, "{conn_id}: {log}");
 		}
 
-		SafeHttpResponse {
+        let _ = file.sync_all();
+
+        let size: u64;
+
+        match file.metadata() {
+            Ok(metadata) => {
+                size = metadata.len();
+            }
+
+            Err(_) => {
+                size = file.bytes().count() as u64;
+            }
+        }
+
+        if size > MAX_LOG_SIZE {
+            let _ = rename(path, Path::new(EDGE_OLD_LOGS));
+        }
+
+
+        SafeHttpResponse {
 			code: StatusCode::OK,
 			json: false,
 			body: None,
 			reason: None,
+		}
+	}
+
+	async fn write_server_logs(&mut self, logs: Vec<String>) {
+		let path = Path::new(SERVER_LOGS);
+
+		let check_file = File::options().append(true).create(true).open(path);
+
+		let mut file;
+		match check_file {
+			Ok(value) => {
+				file = value;
+			}
+			Err(err) => {
+				return;
+			}
+		}
+
+		for log in logs {
+			let _result = writeln!(file, "{log}");
+		}
+
+		let _ = file.sync_all();
+
+		let size: u64;
+		match file.metadata() {
+			Ok(metadata) => {
+				size = metadata.len();
+			}
+			Err(_) => {
+				size = file.bytes().count() as u64;
+			}
+		}
+
+		if size > MAX_LOG_SIZE {
+			let _ = rename(path, Path::new(EDGE_OLD_LOGS));
 		}
 	}
 
@@ -274,7 +342,7 @@ impl FileManager {
 				file = value;
 			}
 			Err(err) => {
-				eprintln!{"Could not open server_state.json due to: {:?}", err};
+				logger().log_warn(format!("Could not open server_state.json due to: {:?}", err).as_str());
 				return
 			}
 		}
@@ -283,7 +351,7 @@ impl FileManager {
 		let result = writeln!(&mut file, "{json}");
 
 		if let Err(err) = result {
-			eprintln!{"Could not write to server_state.json due to: {:?}", err};
+			logger().log_warn(format!("Could not write to server_state.json due to: {:?}", err).as_str());
 		}
 
 		return;
@@ -299,7 +367,7 @@ impl FileManager {
 				file = value;
 			}
 			Err(err) => {
-				eprintln!{"Could not open server_state.json due to: {:?}", err};
+				logger().log_warn(format!("Could not open server_state.json due to: {:?}", err).as_str());
 				return PersistentServerData::default()
 			}
 		}
@@ -309,7 +377,7 @@ impl FileManager {
 		let result = file.read_to_string(&mut body);
 
 		if let Err(err) =  result {
-			eprintln!("Could not read server_state.json due to: {:?}", err);
+			logger().log_warn(format!("Could not open server_state.json due to: {:?}", err).as_str());
 			return PersistentServerData::default()
 		}
 
@@ -320,13 +388,14 @@ impl FileManager {
 				data
 			}
 			Err(err) => {
-				eprintln!("Could not parse server_state.json due to: {:?}", err);
+				logger().log_warn(format!("Could not parse server_state.json due to: {:?}", err).as_str());
 				PersistentServerData::default()
 			}
 		}
 	}
 
 	pub async fn run(mut self) -> io::Result<()> {
+
 		while let Some(cmd) = self.cmd_rx.recv().await {
 			match cmd {
 				Command::GetDefaultConfig { tx } => {
@@ -339,12 +408,16 @@ impl FileManager {
 					let _ = tx.send(response);
 				},
 
-				Command::WriteEdgeLogs { tx, logs } => {
-					let response = self.write_edge_logs(logs).await;
+				Command::WriteEdgeLogs { tx, conn_id, logs } => {
+					let response = self.write_edge_logs(conn_id, logs).await;
 					let _ = tx.send(response);
 				},
 
-				Command::SaveServerState {state} => {
+				Command::WriteServerLogs { logs } => {
+					self.write_server_logs(logs).await;
+				}
+
+				Command::SaveServerState { state } => {
 					self.save_server_state(state).await;
 				}
 
@@ -355,6 +428,9 @@ impl FileManager {
 				}
 			}
 		}
+
+
+
 		Ok(())
 	}
 }
@@ -390,15 +466,25 @@ impl FileManagerHandle {
 
 	pub async fn write_edge_logs(
 		&self,
-		logs: HashSet<String>,
+		conn_id: ConnId,
+		logs: Vec<String>,
 	) -> SafeHttpResponse {
 		let (tx, rx) = oneshot::channel();
 
 		self.cmd_tx
-			.send(Command::WriteEdgeLogs { tx, logs })
+			.send(Command::WriteEdgeLogs { tx, conn_id, logs })
 			.expect("File manager thread closed");
 
 		rx.await.expect("Failed to receive response")
+	}
+
+	pub async fn write_server_logs(
+		&self,
+		logs: Vec<String>
+	) {
+		self.cmd_tx
+			.send(Command::WriteServerLogs { logs })
+			.expect("File manager thread closed");
 	}
 
 	pub async fn save_server_state(&self, state: PersistentServerData) {

@@ -6,4 +6,6 @@ pub type ServerResult<T> = Result<T, ServerError>;
 pub enum ServerError {
     #[error("")]
     CloseConnection { reason: Option<CloseReason> },
+    #[error("Edge ID does not exist")]
+    EdgeIdNotFound,
 }

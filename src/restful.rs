@@ -1,7 +1,7 @@
 	use actix_web::{HttpResponse, Responder, get, post, web};
 use api::restful;
-
-use crate::file_manager::{FileManagerHandle, fill_response};
+	use serde_json::json;
+	use crate::file_manager::{FileManagerHandle, fill_response};
 
 pub fn restful_routes(config: &mut web::ServiceConfig) {
 	config
@@ -33,7 +33,7 @@ async fn edge_logs(
 	file_manager: web::Data<FileManagerHandle>,
 	json: web::Json<restful::Logs>,
 ) -> impl Responder {
-	let response = file_manager.write_edge_logs(json.logs.clone()).await;
+	let response = file_manager.write_edge_logs(json.edge_id, json.logs.clone()).await;
 	fill_response(response)
 }
 
