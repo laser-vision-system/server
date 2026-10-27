@@ -178,16 +178,17 @@ impl Server {
 			camera,
 		};
 
-		if self.cameras.contains_key(&camera_id) {
-			match self.cameras[&camera_id].state {
-				CameraStatus::Active => {
-					return true;
-				},
+		match self.cameras.get(&camera_id) {
+			Some(result) => {
+				 match result.state {
+					CameraStatus::Active => true,
 
-				_ => false,
-			};
+					_ => false
+				}
+			},
+
+			None => false,
 		}
-		false
 	}
 
 	fn camera_in_use(&self, conn_id: ConnId, camera: CameraId) -> bool {
@@ -297,19 +298,9 @@ impl Server {
 			self.list_cameras(*gui).await;
 		}
 
-		let mut remove: HashSet<ConnId> = HashSet::new();
-
-		for route in self.video_routes.keys() {
-			if self.video_routes[route].0 == conn
-				&& self.video_routes[route].1 == camera
-			{
-				remove.insert(*route);
-			}
-		}
-
-		for route in remove {
-			self.video_routes.remove(&route);
-		}
+		self.video_routes.retain(|_, record|
+			!(record.0 == conn && record.1 == camera)
+		);
 	}
 
 	async fn image_analysis(
