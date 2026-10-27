@@ -1,3 +1,4 @@
+//!
 pub mod commands;
 pub mod server_handle;
 
@@ -21,6 +22,7 @@ use crate::WSSide::Edge;
 use crate::{Msg, WSSide};
 use crate::error::{ServerError, ServerResult};
 use crate::file_manager::FileManagerHandle;
+use crate::logger::logger;
 use crate::server::server_handle::ServerHandle;
 use crate::server_persist_data::{PersistentServerData, ShortCameraDetails};
 
@@ -257,6 +259,10 @@ impl Server {
 			camera: data.camera_id,
 		});
 		let Some(details) = get_details else {
+			logger().log_warn(format!
+				("Received UpdateCameraStatus command for unknown camera: ({conn}, {})", data.camera_id)
+				.as_str()
+			);
 			return
 		};
 
@@ -401,13 +407,14 @@ impl Server {
 			conn: conn_id,
 			camera: data.camera_id,
 		};
-		if !self.cameras.contains_key(&camera_id) {
-			return;
-		}
-
 		let old_camera_data;
 
 		if let Some(camera_data) = self.cameras.get_mut(&camera_id) {
+			logger().log_warn(format!(
+				"Received CameraNameUpdate command from edge for unknown camera: ({conn_id}, {})",
+				data.camera_id
+			).as_str());
+
 			old_camera_data = camera_data
 		} else {
 			return
@@ -600,11 +607,17 @@ impl Server {
 			return;
 		}
 
-		match self.cameras[&camera].state {
-			CameraStatus::Active => {},
+		match self.cameras.get(&camera) {
+			None => {}
+			Some(camera_details) => {
+				match camera_details.state {
+					CameraStatus::Active => return,
 
-			_ => return,
+					_ => {},
+				}
+			}
 		}
+
 
 		match side {
 			WSSide::Edge => {
@@ -672,6 +685,10 @@ impl Server {
 					let _ = edge.send(msg);
 				}
 			}
+			logger().log_warn(format!(
+				"Image sent from unused camera: ({conn_id}, {})",
+				camera_id
+			).as_str());
 			return;
 		}
 
