@@ -7,7 +7,6 @@ use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::oneshot;
 use crate::{Msg, WSSide};
 use crate::error::ServerResult;
-use crate::server::Server;
 
 #[derive(Debug, Clone)]
 pub struct ServerHandle {
@@ -258,6 +257,24 @@ impl ServerHandle {
     pub async fn list_processing_types(&self, conn: ConnId) {
         self.cmd_tx
             .send(Command::ListProcessingTypes { conn })
+            .expect("Server thread closed");
+    }
+
+    pub async fn camera_calibrated(&self, conn: ConnId, data: gui::IsCameraCalibrated) {
+        self.cmd_tx
+            .send(Command::IsCameraCalibrated {conn, data})
+            .expect("Server thread closed");
+    }
+
+    pub async fn camera_calibration_update(&self, conn: ConnId, data: edge::CameraCalibrationUpdate) {
+        self.cmd_tx
+            .send(Command::CameraCalibrationUpdate { conn, data })
+            .expect("Server thread closed");
+    }
+
+    pub async fn camera_calibration_status(&self, conn: ConnId, data: edge::CameraCalibrationStatus) {
+        self.cmd_tx
+            .send(Command::CameraCalibrationStatus { conn, data })
             .expect("Server thread closed");
     }
 }

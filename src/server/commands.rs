@@ -141,5 +141,20 @@ pub enum Command {
     EdgeCameraNameUpdate {
         conn: ConnId,
         data: edge::SetNameCamera
-    }
+    },
+
+    IsCameraCalibrated {
+        conn: ConnId,
+        data: gui::IsCameraCalibrated
+    },
+
+    CameraCalibrationUpdate {
+        conn: ConnId,
+        data: edge::CameraCalibrationUpdate
+    },
+
+    CameraCalibrationStatus {
+        conn: ConnId,
+        data: edge::CameraCalibrationStatus
+    },
 }
