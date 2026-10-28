@@ -406,12 +406,9 @@ impl FileManager {
 
 		let data = serde_json::from_str::<PersistentServerData>(&body);
 
-		 data.unwrap_or_else(|err| {
+		data.unwrap_or_else(|err| {
 			logger().log_warn(
-				format!(
-					"Could not parse server_state.json due to: {:?}",
-					err
-				)
+				format!("Could not parse server_state.json due to: {:?}", err)
 					.as_str(),
 			);
 			PersistentServerData::default()
