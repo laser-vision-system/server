@@ -1,20 +1,19 @@
-use std::time::{Duration, Instant};
 use actix_web::web::Bytes;
 use actix_ws::{AggregatedMessage, CloseCode, CloseReason};
+use api::{
+	edge::ServerRequests as EdgeServerRequests,
+	gui::ServerRequests as GUIServerRequests, shared::ConnId,
+};
 use futures_util::StreamExt as _;
 use serde_json::Result;
-use api::{
-	shared::ConnId,
-	edge::ServerRequests as EdgeServerRequests,
-	gui::ServerRequests as GUIServerRequests
-};
+use std::time::{Duration, Instant};
 use tokio::{sync::mpsc, time::interval};
 
-use crate::{server::server_handle::ServerHandle, Msg, WSSide};
-use rand::{self, RngExt as _};
-use tokio::time::Interval;
 use crate::error::{ServerError, ServerResult};
 use crate::logger::logger;
+use crate::{Msg, WSSide, server::server_handle::ServerHandle};
+use rand::{self, RngExt as _};
+use tokio::time::Interval;
 
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(6);
 const CLIENT_TIMEOUT: Duration = Duration::from_secs(12);
@@ -96,8 +95,9 @@ pub async fn ws_handler(
 		conn_id,
 		conn_rx,
 		img_rx,
-		interval
-	).await;
+		interval,
+	)
+	.await;
 
 	match side {
 		WSSide::GUI => {
@@ -116,7 +116,7 @@ pub async fn ws_handler(
 
 async fn handle_loop(
 	session: &mut actix_ws::Session,
-	msg_stream: &mut  actix_ws::AggregatedMessageStream,
+	msg_stream: &mut actix_ws::AggregatedMessageStream,
 	last_heartbeat: &mut Instant,
 	side: WSSide,
 	server: &ServerHandle,
@@ -209,31 +209,29 @@ async fn process_ws_request(
 
 			//Not checking if the session is closed here because the chance of a ping being sent then the connection immediately closing is vanishingly unlikely
 			let _ = session.pong(&bytes).await;
-		}
+		},
 
 		AggregatedMessage::Pong(_) => {
 			*last_heartbeat = Instant::now();
-		}
+		},
 
 		AggregatedMessage::Text(text) => {
 			*last_heartbeat = Instant::now();
-			process_ws(&server, &text, conn, side)
-				.await;
-		}
+			process_ws(&server, &text, conn, side).await;
+		},
 
-		AggregatedMessage::Binary(bin) => {
-			match side {
-				WSSide::GUI => {
-					return Err(ServerError::CloseConnection { reason: None})
-				}
+		AggregatedMessage::Binary(bin) => match side {
+			WSSide::GUI => {
+				return Err(ServerError::CloseConnection { reason: None });
+			},
 
-				WSSide::Edge => {
-					server.route_image(conn, bin).await;
-				}
-			}
-		}
-		AggregatedMessage::Close(reason) =>
-			return Err(ServerError::CloseConnection {reason}),
+			WSSide::Edge => {
+				server.route_image(conn, bin).await;
+			},
+		},
+		AggregatedMessage::Close(reason) => {
+			return Err(ServerError::CloseConnection { reason });
+		},
 	}
 
 	Ok(())
@@ -242,22 +240,22 @@ async fn process_ws_request(
 async fn send_text(
 	session: &mut actix_ws::Session,
 	chat_msg: &str,
-	side: WSSide
+	side: WSSide,
 ) -> ServerResult<()> {
 	match side {
 		WSSide::GUI => {
 			#[cfg(debug_assertions)]
 			println!("Sent to GUI: {chat_msg}");
-		}
+		},
 
 		WSSide::Edge => {
 			#[cfg(debug_assertions)]
 			println!("Sent to Edge: {chat_msg}");
-		}
+		},
 	}
 	let closed = session.text(chat_msg).await;
 	if closed.is_err() {
-		return Err(ServerError::CloseConnection {reason: None})
+		return Err(ServerError::CloseConnection { reason: None });
 	}
 
 	Ok(())
@@ -273,17 +271,17 @@ async fn handle_tick(
 		match side {
 			WSSide::GUI => {
 				logger().log_info(format!("GUI timed out: {conn}").as_str());
-			}
+			},
 
 			WSSide::Edge => {
 				logger().log_info(format!("Edge timed out: {conn}").as_str());
-			}
+			},
 		}
-		return Err(ServerError::CloseConnection {reason: None})
+		return Err(ServerError::CloseConnection { reason: None });
 	}
 	let closed = session.ping(b"").await;
 	if closed.is_err() {
-		return Err(ServerError::CloseConnection {reason: None})
+		return Err(ServerError::CloseConnection { reason: None });
 	}
 
 	Ok(())
@@ -295,7 +293,7 @@ async fn initialise_edge_connection(
 	let Some(Ok(AggregatedMessage::Text(text))) = msg_stream.next().await
 	else {
 		logger().log_warn(
-			"Websocket stream received invalid input while waiting for initialisation"
+			"Websocket stream received invalid input while waiting for initialisation",
 		);
 		return None;
 	};
@@ -310,10 +308,9 @@ async fn initialise_edge_connection(
 		return None;
 	};
 
-	let api::edge::ServerRequests::InitialiseConnection(data) = command
-	else {
+	let api::edge::ServerRequests::InitialiseConnection(data) = command else {
 		logger().log_warn(
-			"Websocket stream received invalid command while waiting for initialisation"
+			"Websocket stream received invalid command while waiting for initialisation",
 		);
 		return None;
 	};
@@ -351,16 +348,18 @@ async fn gui_process(server: &ServerHandle, text: &str, conn: ConnId) {
 	match data_unchecked {
 		Ok(value) => {
 			data = value;
-		}
+		},
 
 		Err(e) => {
 			logger().log_warn(
 				format!(
-				"Message could not deserialized due to: {:?}",
-				e.to_string()).as_str()
+					"Message could not deserialized due to: {:?}",
+					e.to_string()
+				)
+				.as_str(),
 			);
 			return;
-		}
+		},
 	}
 
 	match data {
@@ -446,16 +445,18 @@ async fn edge_process(server: &ServerHandle, text: &str, conn: ConnId) {
 	match data_unchecked {
 		Ok(value) => {
 			data = value;
-		}
+		},
 
 		Err(e) => {
 			logger().log_warn(
 				format!(
 					"Message could not deserialized due to: {:?}",
-					e.to_string()).as_str()
+					e.to_string()
+				)
+				.as_str(),
 			);
 			return;
-		}
+		},
 	}
 
 	match data {

@@ -1,7 +1,7 @@
-	use actix_web::{HttpResponse, Responder, get, post, web};
+use crate::file_manager::{FileManagerHandle, fill_response};
+use actix_web::{HttpResponse, Responder, get, post, web};
 use api::restful;
-	use serde_json::json;
-	use crate::file_manager::{FileManagerHandle, fill_response};
+use serde_json::json;
 
 pub fn restful_routes(config: &mut web::ServiceConfig) {
 	config
@@ -24,7 +24,9 @@ async fn write_default_config(
 	file_manager: web::Data<FileManagerHandle>,
 	json: web::Json<restful::Config>,
 ) -> impl Responder {
-	let response = file_manager.change_default_config(json.settings.clone()).await;
+	let response = file_manager
+		.change_default_config(json.settings.clone())
+		.await;
 	fill_response(response)
 }
 
@@ -33,7 +35,9 @@ async fn edge_logs(
 	file_manager: web::Data<FileManagerHandle>,
 	json: web::Json<restful::Logs>,
 ) -> impl Responder {
-	let response = file_manager.write_edge_logs(json.edge_id, json.logs.clone()).await;
+	let response = file_manager
+		.write_edge_logs(json.edge_id, json.logs.clone())
+		.await;
 	fill_response(response)
 }
 
