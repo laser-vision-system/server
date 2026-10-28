@@ -79,11 +79,11 @@ pub async fn ws_handler(
 
 	match side {
 		WSSide::GUI => {
-			logger().log_info("GUI connected: {conn_id}");
+			logger().log_info(format!("GUI connected: {conn_id}").as_str());
 		},
 
 		WSSide::Edge => {
-			logger().log_info("Edge connected: {conn_id}");
+			logger().log_info(format!("Edge connected: {conn_id}").as_str());
 		},
 	}
 
@@ -101,11 +101,11 @@ pub async fn ws_handler(
 
 	match side {
 		WSSide::GUI => {
-			logger().log_info("GUI disconnected: {conn_id}");
+			logger().log_info(format!("GUI disconnected: {conn_id}").as_str());
 		},
 
 		WSSide::Edge => {
-			logger().log_info("Edge disconnected: {conn_id}");
+			logger().log_info(format!("Edge disconnected: {conn_id}").as_str());
 		},
 	}
 
@@ -272,11 +272,11 @@ async fn handle_tick(
 	if Instant::now().duration_since(*last_heartbeat) > CLIENT_TIMEOUT {
 		match side {
 			WSSide::GUI => {
-				logger().log_info("GUI timed out: {conn}");
+				logger().log_info(format!("GUI timed out: {conn}").as_str());
 			}
 
 			WSSide::Edge => {
-				logger().log_info("Edge timed out: {conn}");
+				logger().log_info(format!("Edge timed out: {conn}").as_str());
 			}
 		}
 		return Err(ServerError::CloseConnection {reason: None})

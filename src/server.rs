@@ -1,3 +1,4 @@
+//!
 pub mod commands;
 pub mod server_handle;
 
@@ -21,6 +22,7 @@ use crate::WSSide::Edge;
 use crate::{Msg, WSSide};
 use crate::error::{ServerError, ServerResult};
 use crate::file_manager::FileManagerHandle;
+use crate::logger::logger;
 use crate::server::server_handle::ServerHandle;
 use crate::server_persist_data::{PersistentServerData, ShortCameraDetails};
 
@@ -176,16 +178,17 @@ impl Server {
 			camera,
 		};
 
-		if self.cameras.contains_key(&camera_id) {
-			match self.cameras[&camera_id].state {
-				CameraStatus::Active => {
-					return true;
-				},
+		match self.cameras.get(&camera_id) {
+			Some(result) => {
+				 match result.state {
+					CameraStatus::Active => true,
 
-				_ => false,
-			};
+					_ => false
+				}
+			},
+
+			None => false,
 		}
-		false
 	}
 
 	fn camera_in_use(&self, conn_id: ConnId, camera: CameraId) -> bool {
@@ -257,6 +260,10 @@ impl Server {
 			camera: data.camera_id,
 		});
 		let Some(details) = get_details else {
+			logger().log_warn(format!
+				("Received UpdateCameraStatus command for unknown camera: ({conn}, {})", data.camera_id)
+				.as_str()
+			);
 			return
 		};
 
@@ -291,19 +298,9 @@ impl Server {
 			self.list_cameras(*gui).await;
 		}
 
-		let mut remove: HashSet<ConnId> = HashSet::new();
-
-		for route in self.video_routes.keys() {
-			if self.video_routes[route].0 == conn
-				&& self.video_routes[route].1 == camera
-			{
-				remove.insert(*route);
-			}
-		}
-
-		for route in remove {
-			self.video_routes.remove(&route);
-		}
+		self.video_routes.retain(|_, record|
+			!(record.0 == conn && record.1 == camera)
+		);
 	}
 
 	async fn image_analysis(
@@ -401,13 +398,14 @@ impl Server {
 			conn: conn_id,
 			camera: data.camera_id,
 		};
-		if !self.cameras.contains_key(&camera_id) {
-			return;
-		}
-
 		let old_camera_data;
 
 		if let Some(camera_data) = self.cameras.get_mut(&camera_id) {
+			logger().log_warn(format!(
+				"Received CameraNameUpdate command from edge for unknown camera: ({conn_id}, {})",
+				data.camera_id
+			).as_str());
+
 			old_camera_data = camera_data
 		} else {
 			return
@@ -418,8 +416,8 @@ impl Server {
 			state: old_camera_data.state,
 			warn_below_threshold: old_camera_data.warn_below_threshold,
 			warn_above_threshold: old_camera_data.warn_above_threshold,
-			alert_above_threshold: old_camera_data.warn_below_threshold,
-			alert_below_threshold: old_camera_data.warn_below_threshold
+			alert_above_threshold: old_camera_data.alert_above_threshold,
+			alert_below_threshold: old_camera_data.alert_below_threshold
 		};
 
 		self.cameras.insert(camera_id, new_camera_data);
@@ -600,11 +598,17 @@ impl Server {
 			return;
 		}
 
-		match self.cameras[&camera].state {
-			CameraStatus::Active => {},
+		match self.cameras.get(&camera) {
+			None => {}
+			Some(camera_details) => {
+				match camera_details.state {
+					CameraStatus::Active => return,
 
-			_ => return,
+					_ => {},
+				}
+			}
 		}
+
 
 		match side {
 			WSSide::Edge => {
@@ -672,6 +676,10 @@ impl Server {
 					let _ = edge.send(msg);
 				}
 			}
+			logger().log_warn(format!(
+				"Image sent from unused camera: ({conn_id}, {})",
+				camera_id
+			).as_str());
 			return;
 		}
 
