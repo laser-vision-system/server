@@ -26,7 +26,6 @@ use std::{
 use tokio::sync::{mpsc, mpsc::UnboundedSender};
 use tokio::time::interval;
 
-
 #[derive(Hash, Debug, Clone, Copy, Eq, PartialEq, Serialize, Deserialize)]
 pub(crate) struct UniqueCameraID {
 	pub conn: ConnId,
@@ -968,7 +967,11 @@ impl Server {
 	}
 
 	/// Forwards an `IsCameraCalibrated` request to the relevant edge
-	async fn camera_calibrated(&mut self, conn_id: ConnId, data: gui::IsCameraCalibrated) {
+	async fn camera_calibrated(
+		&mut self,
+		conn_id: ConnId,
+		data: gui::IsCameraCalibrated,
+	) {
 		if !self.is_connected(data.conn_id, data.camera_id) {
 			return;
 		}
@@ -978,7 +981,8 @@ impl Server {
 			camera_id: data.camera_id,
 		};
 		let msg = EdgeRequests::IsCameraCalibrated(send_data);
-		let send = &serde_json::to_string(&msg).expect("Could not serialize edge request");
+		let send = &serde_json::to_string(&msg)
+			.expect("Could not serialize edge request");
 		let target = self.edge_sessions.get(&data.conn_id);
 		if let Some(target) = target {
 			let _ = target.send(send.clone());
@@ -986,7 +990,11 @@ impl Server {
 	}
 
 	/// Forwards a camera status update to all GUIs
-	async fn camera_calibration_update(&mut self, conn_id: ConnId, data: edge::CameraCalibrationUpdate) {
+	async fn camera_calibration_update(
+		&mut self,
+		conn_id: ConnId,
+		data: edge::CameraCalibrationUpdate,
+	) {
 		if !self.is_connected(conn_id, data.camera_id) && !data.calibrated {
 			logger().log_warn(format!(
 				"Edge tried to set unknown or disconnected camera to calibrated: ({conn_id}, {})",
@@ -995,13 +1003,14 @@ impl Server {
 			return;
 		}
 
-		let data = gui::CameraCalibrationStatus{
+		let data = gui::CameraCalibrationStatus {
 			conn_id,
 			camera_id: data.camera_id,
-			calibrated: data.calibrated
+			calibrated: data.calibrated,
 		};
 		let msg = GUIRequests::CameraCalibrationStatus(data);
-		let send = &serde_json::to_string(&msg).expect("Could not serialize GUI request");
+		let send = &serde_json::to_string(&msg)
+			.expect("Could not serialize GUI request");
 
 		for gui in self.gui_sessions.clone().values() {
 			let _ = gui.send(send.clone());
@@ -1009,7 +1018,11 @@ impl Server {
 	}
 
 	/// Forwards a `CameraCalibrationStatus` request to the respective GUI
-	async fn camera_calibration_status(&mut self, conn_id: ConnId, data: edge::CameraCalibrationStatus) {
+	async fn camera_calibration_status(
+		&mut self,
+		conn_id: ConnId,
+		data: edge::CameraCalibrationStatus,
+	) {
 		if !self.is_connected(conn_id, data.camera_id) && !data.calibrated {
 			logger().log_warn(format!(
 				"Edge tried to set unknown or disconnected camera to calibrated: ({conn_id}, {})",
@@ -1022,10 +1035,11 @@ impl Server {
 		let data = gui::CameraCalibrationStatus {
 			conn_id,
 			camera_id: data.camera_id,
-			calibrated: data.calibrated
+			calibrated: data.calibrated,
 		};
 		let msg = GUIRequests::CameraCalibrationStatus(data);
-		let send = &serde_json::to_string(&msg).expect("Could not serialize GUI request");
+		let send = &serde_json::to_string(&msg)
+			.expect("Could not serialize GUI request");
 		if let Some(target) = self.gui_sessions.get(&target) {
 			let _ = target.send(send.clone());
 		}
