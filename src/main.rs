@@ -1,22 +1,22 @@
+pub mod error;
 mod file_manager;
 mod handler;
+pub mod logger;
 mod restful;
 mod server;
 mod server_persist_data;
-pub mod error;
-pub mod logger;
 
+use self::server::{Server, server_handle::ServerHandle};
+use crate::file_manager::FileManager;
+use crate::logger::logger;
+use actix_web::{App, Error, HttpRequest, HttpResponse, HttpServer, web};
 use std::io;
 use std::time::Duration;
-use actix_web::{App, Error, HttpRequest, HttpResponse, HttpServer, web};
+use tokio::time::sleep;
 use tokio::{
 	task::{spawn, spawn_local},
 	try_join,
 };
-use tokio::time::sleep;
-use self::server::{Server, server_handle::ServerHandle};
-use crate::file_manager::FileManager;
-use crate::logger::logger;
 
 pub type Msg = String;
 
@@ -64,7 +64,6 @@ async fn edge_ws(
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> io::Result<()> {
-
 	let (file_manager, file_manager_tx) = FileManager::new();
 
 	let file_manager = spawn(file_manager.run());
