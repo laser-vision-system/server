@@ -1,19 +1,27 @@
+//!
 pub mod commands;
 pub mod server_handle;
 
+use crate::WSSide::Edge;
+use crate::error::{ServerError, ServerResult};
+use crate::file_manager::FileManagerHandle;
+use crate::logger::logger;
+use crate::server::commands::Command;
+use crate::server::server_handle::ServerHandle;
+use crate::server_persist_data::{PersistentServerData, ShortCameraDetails};
+use crate::{Msg, WSSide};
+use actix_web::web::Bytes;
+use api::{
+	edge::{self, EdgeRequests},
+	gui::{self, CameraDetails, GUIRequests},
+	shared::{self, CameraStatus, Deviation},
+	shared::{CameraId, ConnId},
+};
+use serde::{Deserialize, Serialize};
+use std::time::Duration;
 use std::{
 	collections::{HashMap, HashSet},
 	io,
-};
-use crate::server::commands::Command;
-use std::time::Duration;
-use actix_web::web::Bytes;
-use serde::{Deserialize, Serialize};
-use api::{
-	shared::{CameraId, ConnId},
-	edge::{self, EdgeRequests},
-	gui::{self, CameraDetails, GUIRequests},
-	shared::{self, CameraStatus, Deviation}
 };
 use tokio::sync::{mpsc, mpsc::UnboundedSender};
 use tokio::time::interval;
@@ -34,10 +42,8 @@ pub(crate) struct UniqueCameraID {
 
 impl From<String> for UniqueCameraID {
 	fn from(id: String) -> Self {
-		serde_json::from_str(&*id).unwrap_or(UniqueCameraID {
-			conn: 0,
-			camera: 0,
-		})
+		serde_json::from_str(&*id)
+			.unwrap_or(UniqueCameraID { conn: 0, camera: 0 })
 	}
 }
 
@@ -72,20 +78,24 @@ pub struct Server {
 
 	cmd_rx: mpsc::UnboundedReceiver<Command>,
 
-	file_manager: FileManagerHandle
+	file_manager: FileManagerHandle,
 }
 
 impl Server {
 	pub async fn new(file_manager: FileManagerHandle) -> (Self, ServerHandle) {
 		let (tx, rx) = mpsc::unbounded_channel();
-		
+
 		let loaded_state = file_manager.load_server_state().await;
-		
-		let mut cameras: HashMap<UniqueCameraID, CameraDetails> = HashMap::new();
+
+		let mut cameras: HashMap<UniqueCameraID, CameraDetails> =
+			HashMap::new();
 		for camera in loaded_state.cameras {
-			cameras.insert(UniqueCameraID::from(camera.0), CameraDetails::from(camera.1));
+			cameras.insert(
+				UniqueCameraID::from(camera.0),
+				CameraDetails::from(camera.1),
+			);
 		}
-		
+
 		(
 			Self {
 				gui_sessions: HashMap::new(),
@@ -96,12 +106,14 @@ impl Server {
 				video_routes: HashMap::new(),
 				default_warn_threshold: loaded_state.default_warn_threshold,
 				default_alert_threshold: loaded_state.default_alert_threshold,
-				default_warn_above_threshold: loaded_state.default_warn_above_threshold,
-				default_alert_above_threshold: loaded_state.default_alert_above_threshold,
+				default_warn_above_threshold: loaded_state
+					.default_warn_above_threshold,
+				default_alert_above_threshold: loaded_state
+					.default_alert_above_threshold,
 				cmd_rx: rx,
 				file_manager,
 			},
-			ServerHandle::new(tx)
+			ServerHandle::new(tx),
 		)
 	}
 
@@ -115,16 +127,23 @@ impl Server {
 		match side {
 			WSSide::GUI => {
 				self.gui_sessions.insert(conn_id, tx);
-				self.gui_img_route.insert(conn_id, img_tx.expect("GUI handler tried to register without img_tx"));
+				self.gui_img_route.insert(
+					conn_id,
+					img_tx
+						.expect("GUI handler tried to register without img_tx"),
+				);
 			},
 			WSSide::Edge => {
 				if self.edge_sessions.contains_key(&conn_id) {
-					return false
+					return false;
 				}
 
 				self.edge_sessions.insert(conn_id, tx);
 				if !self.edge_names.contains_key(&conn_id) {
-					self.edge_names.insert(conn_id, format!("Edge {}", self.edge_names.len()));
+					self.edge_names.insert(
+						conn_id,
+						format!("Edge {}", self.edge_names.len()),
+					);
 				}
 
 				for gui in self.gui_sessions.clone().keys() {
@@ -168,7 +187,7 @@ impl Server {
 		self.edge_names
 			.get(&conn_id)
 			.cloned()
-			.ok_or_else(|| {ServerError::EdgeIdNotFound})
+			.ok_or_else(|| ServerError::EdgeIdNotFound)
 	}
 
 	fn is_connected(&self, conn_id: ConnId, camera: CameraId) -> bool {
@@ -177,16 +196,15 @@ impl Server {
 			camera,
 		};
 
-		if self.cameras.contains_key(&camera_id) {
-			match self.cameras[&camera_id].state {
-				CameraStatus::Active => {
-					return true;
-				},
+		match self.cameras.get(&camera_id) {
+			Some(result) => match result.state {
+				CameraStatus::Active => true,
 
 				_ => false,
-			};
+			},
+
+			None => false,
 		}
-		false
 	}
 
 	fn camera_in_use(&self, conn_id: ConnId, camera: CameraId) -> bool {
@@ -205,6 +223,7 @@ impl Server {
 		conn: ConnId,
 		cameras: HashMap<CameraId, edge::NewCameraInfo>,
 	) {
+		let mut name_updates: HashMap<CameraId, String> = HashMap::new();
 		for camera in cameras {
 			let camera_id = camera.0;
 
@@ -212,6 +231,7 @@ impl Server {
 			let mut alert_below_threshold = self.default_alert_threshold;
 			let mut alert_above_threshold = self.default_alert_above_threshold;
 			let mut warn_above_threshold = self.default_warn_above_threshold;
+			let mut updated_name: bool = false;
 
 			if self.cameras.contains_key(&UniqueCameraID {
 				conn,
@@ -221,6 +241,9 @@ impl Server {
 					conn,
 					camera: camera_id,
 				}];
+				if old_details.name != camera.1.name {
+					name_updates.insert(camera_id, old_details.name.clone());
+				}
 				warn_below_threshold = old_details.warn_below_threshold;
 				alert_below_threshold = old_details.alert_below_threshold;
 				alert_above_threshold = old_details.alert_above_threshold;
@@ -243,6 +266,11 @@ impl Server {
 				camera_details,
 			);
 		}
+
+		for (camera, name) in name_updates {
+			self.set_name_camera(conn, camera, name).await;
+		}
+
 		for gui in self.gui_sessions.clone().keys() {
 			self.list_cameras(*gui).await;
 		}
@@ -258,7 +286,14 @@ impl Server {
 			camera: data.camera_id,
 		});
 		let Some(details) = get_details else {
-			return
+			logger().log_warn(
+				format!(
+					"Received UpdateCameraStatus command for unknown camera: ({conn}, {})",
+					data.camera_id
+				)
+				.as_str(),
+			);
+			return;
 		};
 
 		let new_details = CameraDetails {
@@ -292,19 +327,8 @@ impl Server {
 			self.list_cameras(*gui).await;
 		}
 
-		let mut remove: HashSet<ConnId> = HashSet::new();
-
-		for route in self.video_routes.keys() {
-			if self.video_routes[route].0 == conn
-				&& self.video_routes[route].1 == camera
-			{
-				remove.insert(*route);
-			}
-		}
-
-		for route in remove {
-			self.video_routes.remove(&route);
-		}
+		self.video_routes
+			.retain(|_, record| !(record.0 == conn && record.1 == camera));
 	}
 
 	async fn image_analysis(
@@ -318,7 +342,8 @@ impl Server {
 			deviation: analysis.deviation,
 		};
 		let msg = GUIRequests::ImageAnalysis(gui_struct);
-		let send = serde_json::to_string(&msg).expect("Could not serialize GUI request");
+		let send = serde_json::to_string(&msg)
+			.expect("Could not serialize GUI request");
 		for gui in self.gui_sessions.values() {
 			let _ = gui.send(send.clone());
 		}
@@ -345,8 +370,9 @@ impl Server {
 	async fn send_set_point(&mut self, conn: ConnId, camera: CameraId) {
 		let edge_struct = edge::Setpoint { camera_id: camera };
 		let msg = EdgeRequests::Setpoint(edge_struct);
-		let send = serde_json::to_string(&msg).expect("Could not serialize Edge request");
-		if let Some(target) = &self.edge_sessions.get(&conn){
+		let send = serde_json::to_string(&msg)
+			.expect("Could not serialize Edge request");
+		if let Some(target) = &self.edge_sessions.get(&conn) {
 			let _ = target.send(send.clone());
 		}
 	}
@@ -365,7 +391,8 @@ impl Server {
 		};
 
 		let msg = GUIRequests::ListOfCameras(gui_struct);
-		let send = serde_json::to_string(&msg).expect("Could not serialize GUI request");
+		let send = serde_json::to_string(&msg)
+			.expect("Could not serialize GUI request");
 
 		let target = self.gui_sessions.get(&conn);
 
@@ -390,28 +417,34 @@ impl Server {
 		};
 
 		let msg = EdgeRequests::SetNameCamera(edge_struct);
-		let send = serde_json::to_string(&msg).expect("Could not serialize Edge request");
+		let send = serde_json::to_string(&msg)
+			.expect("Could not serialize Edge request");
 
-		if let Some(target) = &self.edge_sessions.get(&conn_id){
+		if let Some(target) = &self.edge_sessions.get(&conn_id) {
 			let _ = target.send(send.clone());
 		}
 	}
 
-	async fn edge_camera_name_update(&mut self, conn_id: ConnId, data: edge::SetNameCamera) {
+	async fn edge_camera_name_update(
+		&mut self,
+		conn_id: ConnId,
+		data: edge::SetNameCamera,
+	) {
 		let camera_id = UniqueCameraID {
 			conn: conn_id,
 			camera: data.camera_id,
 		};
-		if !self.cameras.contains_key(&camera_id) {
-			return;
-		}
-
 		let old_camera_data;
 
 		if let Some(camera_data) = self.cameras.get_mut(&camera_id) {
+			logger().log_warn(format!(
+				"Received CameraNameUpdate command from edge for unknown camera: ({conn_id}, {})",
+				data.camera_id
+			).as_str());
+
 			old_camera_data = camera_data
 		} else {
-			return
+			return;
 		}
 
 		let new_camera_data = CameraDetails {
@@ -419,8 +452,8 @@ impl Server {
 			state: old_camera_data.state,
 			warn_below_threshold: old_camera_data.warn_below_threshold,
 			warn_above_threshold: old_camera_data.warn_above_threshold,
-			alert_above_threshold: old_camera_data.warn_below_threshold,
-			alert_below_threshold: old_camera_data.warn_below_threshold
+			alert_above_threshold: old_camera_data.alert_above_threshold,
+			alert_below_threshold: old_camera_data.alert_below_threshold,
 		};
 
 		self.cameras.insert(camera_id, new_camera_data);
@@ -458,13 +491,16 @@ impl Server {
 			return;
 		}
 
-		let edge_struct =
-			edge::ToggleViewingCamera { camera_id: camera, start_viewing: true };
+		let edge_struct = edge::ToggleViewingCamera {
+			camera_id: camera,
+			start_viewing: true,
+		};
 
 		let msg = EdgeRequests::ToggleViewingCamera(edge_struct);
-		let send = serde_json::to_string(&msg).expect("Could not serialize Edge request");
+		let send = serde_json::to_string(&msg)
+			.expect("Could not serialize Edge request");
 
-		if let Some(target) = &self.edge_sessions.get(&edge_conn){
+		if let Some(target) = &self.edge_sessions.get(&edge_conn) {
 			let _ = target.send(send.clone());
 		}
 	}
@@ -477,7 +513,7 @@ impl Server {
 		if let Some(entry) = c_video_routes.get(&conn) {
 			route = entry;
 		} else {
-			return
+			return;
 		}
 
 		c2_video_routes.remove(&conn);
@@ -487,12 +523,15 @@ impl Server {
 			return;
 		}
 
-		let edge_struct =
-			edge::ToggleViewingCamera { camera_id: route.1, start_viewing: false };
+		let edge_struct = edge::ToggleViewingCamera {
+			camera_id: route.1,
+			start_viewing: false,
+		};
 		let msg = EdgeRequests::ToggleViewingCamera(edge_struct);
-		let send = serde_json::to_string(&msg).expect("Could not serialize Edge request");
+		let send = serde_json::to_string(&msg)
+			.expect("Could not serialize Edge request");
 
-		if let Some(target) = &self.edge_sessions.get(&route.0){
+		if let Some(target) = &self.edge_sessions.get(&route.0) {
 			let _ = target.send(send.clone());
 		}
 	}
@@ -526,7 +565,8 @@ impl Server {
 					configuration: config.configuration,
 				};
 				let msg = EdgeRequests::Configuration(fwd_config);
-				send = serde_json::to_string(&msg).expect("Could not serialize Edge request");
+				send = serde_json::to_string(&msg)
+					.expect("Could not serialize Edge request");
 				target = self.edge_sessions.get(&config.conn_id);
 			},
 			WSSide::Edge => {
@@ -536,7 +576,8 @@ impl Server {
 					configuration: config.configuration,
 				};
 				let msg = GUIRequests::Configuration(fwd_config);
-				send = serde_json::to_string(&msg).expect("Could not serialize GUI request");
+				send = serde_json::to_string(&msg)
+					.expect("Could not serialize GUI request");
 
 				target = self.gui_sessions.get(&config.conn_id);
 			},
@@ -556,14 +597,14 @@ impl Server {
 			return;
 		}
 
-		let fwd_data: shared::ViewCameraConfig =
-			shared::ViewCameraConfig {
-				conn_id: conn,
-				camera_id: camera.camera_id,
-			};
+		let fwd_data: shared::ViewCameraConfig = shared::ViewCameraConfig {
+			conn_id: conn,
+			camera_id: camera.camera_id,
+		};
 
 		let msg = EdgeRequests::ViewCameraConfig(fwd_data);
-		let send = serde_json::to_string(&msg).expect("Could not serialize Edge request");
+		let send = serde_json::to_string(&msg)
+			.expect("Could not serialize Edge request");
 
 		if let Some(target) = &self.edge_sessions.get(&camera.conn_id) {
 			let _ = target.send(send.clone());
@@ -601,10 +642,13 @@ impl Server {
 			return;
 		}
 
-		match self.cameras[&camera].state {
-			CameraStatus::Active => {},
+		match self.cameras.get(&camera) {
+			None => {},
+			Some(camera_details) => match camera_details.state {
+				CameraStatus::Active => return,
 
-			_ => return,
+				_ => {},
+			},
 		}
 
 		match side {
@@ -615,10 +659,11 @@ impl Server {
 					confirm: target.confirm,
 				};
 				let msg = GUIRequests::ForgetCamera(data);
-				let send = serde_json::to_string(&msg).expect("Could not serialize GUI request");
+				let send = serde_json::to_string(&msg)
+					.expect("Could not serialize GUI request");
 
 				let Some(gui) = self.gui_sessions.get(&target.conn_id) else {
-					return
+					return;
 				};
 
 				let _ = gui.send(send.clone());
@@ -638,7 +683,8 @@ impl Server {
 					confirm: target.confirm,
 				};
 				let msg = EdgeRequests::ForgetCameraRequest(data);
-				let send = serde_json::to_string(&msg).expect("Could not serialize Edge request");
+				let send = serde_json::to_string(&msg)
+					.expect("Could not serialize Edge request");
 
 				if let Some(target) = self.gui_sessions.get(&target.conn_id) {
 					let _ = target.send(send.clone());
@@ -659,20 +705,29 @@ impl Server {
 
 		if !self.camera_in_use(conn_id, camera_id) {
 			// If the edge is sending images for cameras not being viewed, tell it to stop.
-			if self.cameras.contains_key(&UniqueCameraID{
+			if self.cameras.contains_key(&UniqueCameraID {
 				conn: conn_id,
-				camera: camera_id
+				camera: camera_id,
 			}) {
 				if let Some(edge) = self.edge_sessions.get(&conn_id) {
-					let send = edge::ToggleViewingCamera{
+					let send = edge::ToggleViewingCamera {
 						camera_id,
-						start_viewing: false
+						start_viewing: false,
 					};
-					let msg = serde_json::to_string(&EdgeRequests::ToggleViewingCamera(send))
-						.expect("Could not serialize Edge request");
+					let msg = serde_json::to_string(
+						&EdgeRequests::ToggleViewingCamera(send),
+					)
+					.expect("Could not serialize Edge request");
 					let _ = edge.send(msg);
 				}
 			}
+			logger().log_warn(
+				format!(
+					"Image sent from unused camera: ({conn_id}, {})",
+					camera_id
+				)
+				.as_str(),
+			);
 			return;
 		}
 
@@ -691,10 +746,7 @@ impl Server {
 		}
 	}
 
-	async fn set_camera_thresholds(
-		&mut self,
-		data: gui::SetCameraThresholds,
-	) {
+	async fn set_camera_thresholds(&mut self, data: gui::SetCameraThresholds) {
 		let camera = UniqueCameraID {
 			conn: data.edge_id,
 			camera: data.camera_id,
@@ -717,26 +769,21 @@ impl Server {
 		}
 	}
 
-	async fn set_default_thresholds(
-		&mut self,
-		data: gui::SetDefaultThreshold,
-	) {
+	async fn set_default_thresholds(&mut self, data: gui::SetDefaultThreshold) {
 		self.default_warn_threshold = data.warn_below_threshold;
 		self.default_alert_threshold = data.alert_below_threshold;
 		self.default_warn_above_threshold = data.warn_above_threshold;
 		self.default_alert_above_threshold = data.alert_above_threshold;
 	}
 
-	async fn set_edge_processing(
-		&mut self,
-		data: gui::SetEdgeProcessingType,
-	) {
+	async fn set_edge_processing(&mut self, data: gui::SetEdgeProcessingType) {
 		let send_data = edge::SetProcessingType {
 			processing_type: data.processing_type,
 		};
 		let msg = EdgeRequests::SetProcessingType(send_data);
 
-		let send = &serde_json::to_string(&msg).expect("Could not serialize Edge request");
+		let send = &serde_json::to_string(&msg)
+			.expect("Could not serialize Edge request");
 
 		let target = self.edge_sessions.get(&data.edge_id);
 
@@ -755,7 +802,8 @@ impl Server {
 
 		let msg = GUIRequests::DefaultThresholds(data);
 
-		let send = &serde_json::to_string(&msg).expect("Could not serialize GUI request");
+		let send = &serde_json::to_string(&msg)
+			.expect("Could not serialize GUI request");
 		let target = self.gui_sessions.get(&conn_id);
 
 		if let Some(target) = target {
@@ -783,7 +831,8 @@ impl Server {
 			edges: edge_names_copy,
 		};
 		let msg = GUIRequests::ListOfEdges(data);
-		let send = &serde_json::to_string(&msg).expect("Could not serialize GUI request");
+		let send = &serde_json::to_string(&msg)
+			.expect("Could not serialize GUI request");
 
 		let target = self.gui_sessions.get(&conn_id);
 		if let Some(target) = target {
@@ -811,7 +860,8 @@ impl Server {
 			edges: edge_names_copy,
 		};
 		let msg = GUIRequests::DisconnectedEdges(data);
-		let send = &serde_json::to_string(&msg).expect("Could not serialize GUI request");
+		let send = &serde_json::to_string(&msg)
+			.expect("Could not serialize GUI request");
 
 		let target = self.gui_sessions.get(&conn_id);
 		if let Some(target) = target {
@@ -853,7 +903,8 @@ impl Server {
 			alert_description: alert.alert_description,
 		};
 		let msg = GUIRequests::Alert(data);
-		let send = serde_json::to_string(&msg).expect("Could not serialize GUI request");
+		let send = serde_json::to_string(&msg)
+			.expect("Could not serialize GUI request");
 
 		if let Some(target) = target {
 			if let Some(gui) = self.gui_sessions.get(&target) {
@@ -866,15 +917,13 @@ impl Server {
 		}
 	}
 
-	async fn force_retry_camera(
-		&mut self,
-		data: gui::ForceRetryCamera,
-	) {
+	async fn force_retry_camera(&mut self, data: gui::ForceRetryCamera) {
 		let send_data = edge::ForceRetryCamera {
 			camera_id: data.camera_id,
 		};
 		let msg = EdgeRequests::ForceRetryCamera(send_data);
-		let send = &serde_json::to_string(&msg).expect("Could not serialize Edge request");
+		let send = &serde_json::to_string(&msg)
+			.expect("Could not serialize Edge request");
 		let target = self.gui_sessions.get(&data.camera_id);
 		if let Some(target) = target {
 			let _ = target.send(send.clone());
@@ -884,7 +933,8 @@ impl Server {
 	async fn list_processing_types(&mut self, conn_id: ConnId) {
 		let data = gui::ProcessingTypes::default();
 		let msg = GUIRequests::ProcessingTypes(data);
-		let send = &serde_json::to_string(&msg).expect("Could not serialize GUI request");
+		let send = &serde_json::to_string(&msg)
+			.expect("Could not serialize GUI request");
 		let target = self.gui_sessions.get(&conn_id);
 		if let Some(target) = target {
 			let _ = target.send(send.clone());
@@ -894,7 +944,10 @@ impl Server {
 	async fn get_persist_data(&mut self) -> PersistentServerData {
 		let mut cameras: HashMap<String, ShortCameraDetails> = HashMap::new();
 		for camera in self.cameras.clone() {
- 			cameras.insert(String::from(camera.0), ShortCameraDetails::from(camera.1));
+			cameras.insert(
+				String::from(camera.0),
+				ShortCameraDetails::from(camera.1),
+			);
 		}
 
 		PersistentServerData {
@@ -1002,7 +1055,7 @@ impl Server {
 							let success = self.connect(conn_tx, img_tx, conn_id, side).await;
 							let _ = res_tx.send(success);
 						},
-		
+
 						Command::Disconnect { conn, side } => {
 							self.disconnect(conn, side).await;
 						},
@@ -1011,27 +1064,27 @@ impl Server {
 							let result = self.get_edge_name(conn_id);
 							let _ = res_tx.send(result);
 						}
-		
+
 						Command::RegisterCameras { conn, cameras } => {
 							self.register_cameras(conn, cameras).await;
 						},
-		
+
 						Command::UpdateCameraStatus { conn, data } => {
 							self.update_camera_status(conn, data).await;
 						},
-		
+
 						Command::ImageAnalysis { conn, analysis } => {
 							self.image_analysis(conn, analysis).await;
 						},
-		
+
 						Command::Setpoint { target } => {
 							self.set_point(target).await;
 						},
-		
+
 						Command::ListCameras { conn } => {
 							self.list_cameras(conn).await;
 						},
-		
+
 						Command::SetNameCamera { conn, camera, name } => {
 							self.set_name_camera(conn, camera, name).await;
 						},
@@ -1039,7 +1092,7 @@ impl Server {
 						Command::EdgeCameraNameUpdate {conn, data} => {
 							self.edge_camera_name_update(conn, data).await;
 						}
-		
+
 						Command::StartViewingCamera {
 							gui_conn,
 							edge_conn,
@@ -1048,43 +1101,43 @@ impl Server {
 							self.start_viewing_camera(gui_conn, edge_conn, camera)
 								.await;
 						},
-		
+
 						Command::StopViewingCamera { conn } => {
 							self.stop_viewing_camera(conn).await;
 						},
-		
+
 						Command::Configuration { conn, config, side } => {
 							self.configuration(conn, config, side).await;
 						},
-		
+
 						Command::ViewCameraConfig { conn, camera } => {
 							self.view_camera_config(conn, camera).await;
 						},
-		
+
 						Command::ForgetCamera { conn, target, side } => {
 							self.forget_camera(conn, target, side).await;
 						},
-		
+
 						Command::RouteImage { conn, bytes } => {
 							self.route_image(conn, bytes).await;
 						},
-		
+
 						Command::SetCameraThresholds { data } => {
 							self.set_camera_thresholds(data).await;
 						},
-		
+
 						Command::SetDefaultThresholds { data } => {
 							self.set_default_thresholds(data).await;
 						},
-		
+
 						Command::SetEdgeProcessingType { data } => {
 							self.set_edge_processing(data).await;
 						},
-		
+
 						Command::GetDefaultThresholds { conn } => {
 							self.get_default_thresholds(conn).await;
 						},
-		
+
 						Command::ListEdges { conn } => {
 							self.list_edges(conn).await;
 						},
@@ -1096,23 +1149,23 @@ impl Server {
 						Command::ForgetEdge { data } => {
 							self.forget_edge(data).await;
 						}
-		
+
 						Command::SetEdgeName { data } => {
 							self.set_edge_name(data).await;
 						},
-		
+
 						Command::AlertFromEdge { conn, data } => {
 							self.send_alert(Some(conn), data, None).await;
 						},
-		
+
 						Command::AlertFromServer { data, target } => {
 							self.send_alert(None, data, target).await;
 						},
-		
+
 						Command::ForceRetryCamera { data } => {
 							self.force_retry_camera(data).await;
 						},
-		
+
 						Command::ListProcessingTypes { conn } => {
 							self.list_processing_types(conn).await;
 						},
@@ -1130,7 +1183,7 @@ impl Server {
 						}
 					}
 				}
-				
+
 				_ = interval.tick() => {
 					self.clear_disconnected_channels().await;
 					let save_data = self.get_persist_data().await;
