@@ -831,11 +831,18 @@ impl Server {
 			return;
 		}
 
+		if !self.edge_names.contains_key(&data.conn) {
+			return;
+		}
+
 		self.edge_names.remove(&data.conn);
+
+		self.cameras.retain(|camera, _| camera.conn != data.conn);
 
 		for gui in self.gui_sessions.clone().keys() {
 			self.list_edges(*gui).await;
 			self.disconnected_edges(*gui).await;
+			self.list_cameras(*gui).await;
 		}
 	}
 
