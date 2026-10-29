@@ -262,4 +262,34 @@ impl ServerHandle {
 			.send(Command::ListProcessingTypes { conn })
 			.expect("Server thread closed");
 	}
+
+	pub async fn camera_calibrated(
+		&self,
+		conn: ConnId,
+		data: gui::IsCameraCalibrated,
+	) {
+		self.cmd_tx
+			.send(Command::IsCameraCalibrated { conn, data })
+			.expect("Server thread closed");
+	}
+
+	pub async fn camera_calibration_update(
+		&self,
+		conn: ConnId,
+		data: edge::CameraCalibrationUpdate,
+	) {
+		self.cmd_tx
+			.send(Command::CameraCalibrationUpdate { conn, data })
+			.expect("Server thread closed");
+	}
+
+	pub async fn camera_calibration_status(
+		&self,
+		conn: ConnId,
+		data: edge::CameraCalibrationStatus,
+	) {
+		self.cmd_tx
+			.send(Command::CameraCalibrationStatus { conn, data })
+			.expect("Server thread closed");
+	}
 }

@@ -427,6 +427,10 @@ async fn gui_process(server: &ServerHandle, text: &str, conn: ConnId) {
 			server.list_processing_types(conn).await
 		},
 
+		GUIServerRequests::IsCameraCalibrated(data) => {
+			server.camera_calibrated(conn, data).await;
+		},
+
 		_ => {
 			logger().log_warn("Received unrecognized GUI command");
 		},
@@ -488,6 +492,14 @@ async fn edge_process(server: &ServerHandle, text: &str, conn: ConnId) {
 
 		EdgeServerRequests::SetNameCamera(data) => {
 			server.edge_camera_name_update(conn, data).await
+		},
+
+		EdgeServerRequests::CameraCalibrationUpdate(data) => {
+			server.camera_calibration_update(conn, data).await
+		},
+
+		EdgeServerRequests::CameraCalibrationStatus(data) => {
+			server.camera_calibration_status(conn, data).await
 		},
 
 		_ => {

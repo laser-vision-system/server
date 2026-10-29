@@ -973,6 +973,85 @@ impl Server {
 		}
 	}
 
+	/// Forwards an `IsCameraCalibrated` request to the relevant edge
+	async fn camera_calibrated(
+		&mut self,
+		conn_id: ConnId,
+		data: gui::IsCameraCalibrated,
+	) {
+		if !self.is_connected(data.conn_id, data.camera_id) {
+			return;
+		}
+
+		let send_data = edge::IsCameraCalibrated {
+			gui_id: conn_id,
+			camera_id: data.camera_id,
+		};
+		let msg = EdgeRequests::IsCameraCalibrated(send_data);
+		let send = &serde_json::to_string(&msg)
+			.expect("Could not serialize edge request");
+		let target = self.edge_sessions.get(&data.conn_id);
+		if let Some(target) = target {
+			let _ = target.send(send.clone());
+		}
+	}
+
+	/// Forwards a camera status update to all GUIs
+	async fn camera_calibration_update(
+		&mut self,
+		conn_id: ConnId,
+		data: edge::CameraCalibrationUpdate,
+	) {
+		if !self.is_connected(conn_id, data.camera_id) && !data.calibrated {
+			logger().log_warn(format!(
+				"Edge tried to set unknown or disconnected camera to calibrated: ({conn_id}, {})",
+				data.camera_id
+			).as_str());
+			return;
+		}
+
+		let data = gui::CameraCalibrationStatus {
+			conn_id,
+			camera_id: data.camera_id,
+			calibrated: data.calibrated,
+		};
+		let msg = GUIRequests::CameraCalibrationStatus(data);
+		let send = &serde_json::to_string(&msg)
+			.expect("Could not serialize GUI request");
+
+		for gui in self.gui_sessions.clone().values() {
+			let _ = gui.send(send.clone());
+		}
+	}
+
+	/// Forwards a `CameraCalibrationStatus` request to the respective GUI
+	async fn camera_calibration_status(
+		&mut self,
+		conn_id: ConnId,
+		data: edge::CameraCalibrationStatus,
+	) {
+		if !self.is_connected(conn_id, data.camera_id) && !data.calibrated {
+			logger().log_warn(format!(
+				"Edge tried to set unknown or disconnected camera to calibrated: ({conn_id}, {})",
+				data.camera_id
+			).as_str());
+			return;
+		}
+
+		let target = data.gui_id;
+		let data = gui::CameraCalibrationStatus {
+			conn_id,
+			camera_id: data.camera_id,
+			calibrated: data.calibrated,
+		};
+		let msg = GUIRequests::CameraCalibrationStatus(data);
+		let send = &serde_json::to_string(&msg)
+			.expect("Could not serialize GUI request");
+		if let Some(target) = self.gui_sessions.get(&target) {
+			let _ = target.send(send.clone());
+		}
+	}
+
 	pub async fn run(mut self) -> io::Result<()> {
 		let mut interval = interval(Duration::from_secs(15));
 		interval.tick().await;
@@ -1104,6 +1183,18 @@ impl Server {
 						Command::ListProcessingTypes { conn } => {
 							self.list_processing_types(conn).await;
 						},
+
+						Command::IsCameraCalibrated{ conn, data } => {
+							self.camera_calibrated(conn, data).await;
+						}
+
+						Command::CameraCalibrationUpdate{ conn, data } => {
+							self.camera_calibration_update(conn, data).await;
+						}
+
+						Command::CameraCalibrationStatus{ conn, data } => {
+							self.camera_calibration_status(conn, data).await;
+						}
 					}
 				}
 
