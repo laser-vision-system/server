@@ -406,19 +406,13 @@ impl FileManager {
 
 		let data = serde_json::from_str::<PersistentServerData>(&body);
 
-		return match data {
-			Ok(data) => data,
-			Err(err) => {
-				logger().log_warn(
-					format!(
-						"Could not parse server_state.json due to: {:?}",
-						err
-					)
+		data.unwrap_or_else(|err| {
+			logger().log_warn(
+				format!("Could not parse server_state.json due to: {:?}", err)
 					.as_str(),
-				);
-				PersistentServerData::default()
-			},
-		};
+			);
+			PersistentServerData::default()
+		})
 	}
 
 	pub async fn run(mut self) -> io::Result<()> {

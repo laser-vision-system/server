@@ -215,6 +215,7 @@ impl Server {
 		conn: ConnId,
 		cameras: HashMap<CameraId, edge::NewCameraInfo>,
 	) {
+		let mut name_updates: HashMap<CameraId, String> = HashMap::new();
 		for camera in cameras {
 			let camera_id = camera.0;
 
@@ -222,6 +223,7 @@ impl Server {
 			let mut alert_below_threshold = self.default_alert_threshold;
 			let mut alert_above_threshold = self.default_alert_above_threshold;
 			let mut warn_above_threshold = self.default_warn_above_threshold;
+			let mut updated_name: bool = false;
 
 			if self.cameras.contains_key(&UniqueCameraID {
 				conn,
@@ -231,6 +233,9 @@ impl Server {
 					conn,
 					camera: camera_id,
 				}];
+				if old_details.name != camera.1.name {
+					name_updates.insert(camera_id, old_details.name.clone());
+				}
 				warn_below_threshold = old_details.warn_below_threshold;
 				alert_below_threshold = old_details.alert_below_threshold;
 				alert_above_threshold = old_details.alert_above_threshold;
@@ -253,6 +258,11 @@ impl Server {
 				camera_details,
 			);
 		}
+
+		for (camera, name) in name_updates {
+			self.set_name_camera(conn, camera, name).await;
+		}
+
 		for gui in self.gui_sessions.clone().keys() {
 			self.list_cameras(*gui).await;
 		}

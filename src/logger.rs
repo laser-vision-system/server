@@ -28,26 +28,20 @@ impl LoggerGuard {
 	}
 
 	pub fn log_info(&self, message: &str) {
-		let guard = match self.inner.lock() {
-			Ok(cell) => cell,
-			Err(why) => {
-				eprintln!("Logger was poisoned!");
-				why.into_inner()
-			},
-		};
+		let guard = self.inner.lock().unwrap_or_else(|why| {
+			eprintln!("Logger was poisoned!");
+			why.into_inner()
+		});
 		let mut logger = guard.borrow_mut();
 
 		logger.log_info(message);
 	}
 
 	pub fn log_warn(&self, message: &str) {
-		let guard = match self.inner.lock() {
-			Ok(cell) => cell,
-			Err(why) => {
-				eprintln!("Logger was poisoned!");
-				why.into_inner()
-			},
-		};
+		let guard = self.inner.lock().unwrap_or_else(|why| {
+			eprintln!("Logger was poisoned!");
+			why.into_inner()
+		});
 		let mut logger = guard.borrow_mut();
 
 		logger.log_warn(message);
@@ -57,39 +51,30 @@ impl LoggerGuard {
 	where
 		T: Display + ?Sized,
 	{
-		let guard = match self.inner.lock() {
-			Ok(cell) => cell,
-			Err(why) => {
-				eprintln!("Logger was poisoned!");
-				why.into_inner()
-			},
-		};
+		let guard = self.inner.lock().unwrap_or_else(|why| {
+			eprintln!("Logger was poisoned!");
+			why.into_inner()
+		});
 		let mut logger = guard.borrow_mut();
 
 		logger.log_error(error);
 	}
 
 	pub fn init_filesystem(&self, file_manager: FileManagerHandle) {
-		let guard = match self.inner.lock() {
-			Ok(cell) => cell,
-			Err(why) => {
-				eprintln!("Logger was poisoned!");
-				why.into_inner()
-			},
-		};
+		let guard = self.inner.lock().unwrap_or_else(|why| {
+			eprintln!("Logger was poisoned!");
+			why.into_inner()
+		});
 
 		let mut logger = guard.borrow_mut();
 		logger.init_filesystem(file_manager);
 	}
 
 	pub async fn flush_logs(&self) {
-		let guard = match self.inner.lock() {
-			Ok(cell) => cell,
-			Err(why) => {
-				eprintln!("Logger was poisoned!");
-				why.into_inner()
-			},
-		};
+		let guard = self.inner.lock().unwrap_or_else(|why| {
+			eprintln!("Logger was poisoned!");
+			why.into_inner()
+		});
 
 		let mut logger = guard.borrow_mut();
 		logger.flush_logs().await;
