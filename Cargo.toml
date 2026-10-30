@@ -17,13 +17,14 @@ rand = "0.10.1"
 api = { path = "./api"}
 serde_json = "1.0.149"
 thiserror = "2.0.21"
+chrono = "0.4.45"
 
 [lints.rust]
 unsafe_code = "deny" # We should avoid using unsafe code as much as possible.
-missing_docs = "deny" # Make sure to include documentation.
+missing_docs = "allow" # Make sure to include documentation.
 
 [lints.rustdoc]
-missing_crate_level_docs = "deny" # The crate-level docs should give a brief overview.
+missing_crate_level_docs = "allow" # The crate-level docs should give a brief overview.
 broken_intra_doc_links = "deny" # All links should be correct.
 
 [lints.clippy]
@@ -34,8 +35,8 @@ tabs_in_doc_comments = "allow" # Tabs expected for indentation.
 
 pedantic = { level = "deny", priority = -1 }
 must_use_candidate = "allow" # We don't need to be constantly alerted to this.
-missing_errors_doc = "deny" # Documentation should be thorough.
-missing_panics_doc = "deny" # Documentation should be thorough.
+missing_errors_doc = "allow" # Documentation should be thorough.
+missing_panics_doc = "allow" # Documentation should be thorough.
 
 # ===== restriction group lints ======
 

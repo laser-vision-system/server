@@ -8,11 +8,6 @@ on:
   push:
     branches:
       - 'main'
-    paths:
-      - '**.rs'
-      - 'Cargo.lock'
-      - 'Dockerfile'
-      - ...
 
 env:
   REGISTRY: ghcr.io

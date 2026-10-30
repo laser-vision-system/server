@@ -1,139 +1,160 @@
-use std::collections::HashMap;
+use crate::error::ServerResult;
+use crate::{Msg, WSSide};
 use actix_web::web::Bytes;
-use api::{edge, gui, shared};
 use api::shared::{CameraId, ConnId};
+use api::{edge, gui, shared};
+use std::collections::HashMap;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::oneshot;
-use crate::{Msg, WSSide};
 
 #[derive(Debug)]
 pub enum Command {
-    Connect {
-        conn_tx: UnboundedSender<Msg>,
-        res_tx: oneshot::Sender<bool>,
-        conn_id: ConnId,
-        side: WSSide,
-        img_tx: Option<UnboundedSender<Bytes>>,
-    },
+	Connect {
+		conn_tx: UnboundedSender<Msg>,
+		res_tx: oneshot::Sender<bool>,
+		conn_id: ConnId,
+		side: WSSide,
+		img_tx: Option<UnboundedSender<Bytes>>,
+	},
 
-    Disconnect {
-        conn: ConnId,
-        side: WSSide,
-    },
+	Disconnect {
+		conn: ConnId,
+		side: WSSide,
+	},
 
-    RegisterCameras {
-        conn: ConnId,
-        cameras: HashMap<CameraId, edge::NewCameraInfo>,
-    },
+	GetEdgeName {
+		res_tx: oneshot::Sender<ServerResult<String>>,
+		conn_id: ConnId,
+	},
 
-    UpdateCameraStatus {
-        conn: ConnId,
-        data: edge::UpdateCameraStatus,
-    },
+	RegisterCameras {
+		conn: ConnId,
+		cameras: HashMap<CameraId, edge::NewCameraInfo>,
+	},
 
-    ImageAnalysis {
-        conn: ConnId,
-        analysis: edge::ImageAnalysis,
-    },
+	UpdateCameraStatus {
+		conn: ConnId,
+		data: edge::UpdateCameraStatus,
+	},
 
-    Setpoint {
-        target: Option<gui::Setpoint>,
-    },
+	ImageAnalysis {
+		conn: ConnId,
+		analysis: edge::ImageAnalysis,
+	},
 
-    ListCameras {
-        conn: ConnId,
-    },
+	Setpoint {
+		target: Option<gui::Setpoint>,
+	},
 
-    ListDisconnectedEdges {
-        conn: ConnId,
-    },
+	ListCameras {
+		conn: ConnId,
+	},
 
-    ForgetEdge {
-        data: gui::ForgetEdge,
-    },
+	ListDisconnectedEdges {
+		conn: ConnId,
+	},
 
-    SetNameCamera {
-        conn: ConnId,
-        camera: CameraId,
-        name: String,
-    },
+	ForgetEdge {
+		data: gui::ForgetEdge,
+	},
 
-    StartViewingCamera {
-        gui_conn: ConnId,
-        edge_conn: ConnId,
-        camera: CameraId,
-    },
+	SetNameCamera {
+		conn: ConnId,
+		camera: CameraId,
+		name: String,
+	},
 
-    StopViewingCamera {
-        conn: ConnId,
-    },
+	StartViewingCamera {
+		gui_conn: ConnId,
+		edge_conn: ConnId,
+		camera: CameraId,
+	},
 
-    ViewCameraConfig {
-        conn: ConnId,
-        camera: shared::ViewCameraConfig,
-    },
+	StopViewingCamera {
+		conn: ConnId,
+	},
 
-    Configuration {
-        conn: ConnId,
-        config: shared::Configuration,
-        side: WSSide,
-    },
+	ViewCameraConfig {
+		conn: ConnId,
+		camera: shared::ViewCameraConfig,
+	},
 
-    ForgetCamera {
-        conn: ConnId,
-        target: shared::ForgetCameraRequest,
-        side: WSSide,
-    },
+	Configuration {
+		conn: ConnId,
+		config: shared::Configuration,
+		side: WSSide,
+	},
 
-    RouteImage {
-        conn: ConnId,
-        bytes: Bytes,
-    },
+	ForgetCamera {
+		conn: ConnId,
+		target: shared::ForgetCameraRequest,
+		side: WSSide,
+	},
 
-    SetCameraThresholds {
-        data: gui::SetCameraThresholds,
-    },
+	RouteImage {
+		conn: ConnId,
+		bytes: Bytes,
+	},
 
-    SetDefaultThresholds {
-        data: gui::SetDefaultThreshold,
-    },
+	SetCameraThresholds {
+		data: gui::SetCameraThresholds,
+	},
 
-    SetEdgeProcessingType {
-        data: gui::SetEdgeProcessingType,
-    },
+	SetDefaultThresholds {
+		data: gui::SetDefaultThreshold,
+	},
 
-    GetDefaultThresholds {
-        conn: ConnId,
-    },
+	SetEdgeProcessingType {
+		data: gui::SetEdgeProcessingType,
+	},
 
-    ListEdges {
-        conn: ConnId,
-    },
+	GetDefaultThresholds {
+		conn: ConnId,
+	},
 
-    SetEdgeName {
-        data: gui::SetEdgeName,
-    },
+	ListEdges {
+		conn: ConnId,
+	},
 
-    AlertFromEdge {
-        conn: ConnId,
-        data: edge::Alert,
-    },
+	SetEdgeName {
+		data: gui::SetEdgeName,
+	},
 
-    AlertFromServer {
-        target: Option<ConnId>,
-        data: edge::Alert,
-    },
+	AlertFromEdge {
+		conn: ConnId,
+		data: edge::Alert,
+	},
 
-    ForceRetryCamera {
-        data: gui::ForceRetryCamera,
-    },
+	AlertFromServer {
+		target: Option<ConnId>,
+		data: edge::Alert,
+	},
 
-    ListProcessingTypes {
-        conn: ConnId,
-    },
+	ForceRetryCamera {
+		data: gui::ForceRetryCamera,
+	},
 
-    EdgeCameraNameUpdate {
-        conn: ConnId,
-        data: edge::SetNameCamera
-    }
+	ListProcessingTypes {
+		conn: ConnId,
+	},
+
+	EdgeCameraNameUpdate {
+		conn: ConnId,
+		data: edge::SetNameCamera,
+	},
+
+	IsCameraCalibrated {
+		conn: ConnId,
+		data: gui::IsCameraCalibrated,
+	},
+
+	CameraCalibrationUpdate {
+		conn: ConnId,
+		data: edge::CameraCalibrationUpdate,
+	},
+
+	CameraCalibrationStatus {
+		conn: ConnId,
+		data: edge::CameraCalibrationStatus,
+	},
 }
